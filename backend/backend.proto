@@ -12,7 +12,7 @@ service Backend {
   rpc Predict(PredictOptions) returns (Reply) {}
   rpc LoadModel(ModelOptions) returns (Result) {}
   rpc PredictStream(PredictOptions) returns (stream Reply) {}
-  rpc Embedding(PredictOptions) returns (EmbeddingResult) {}
+  rpc Embeddings(PredictOptions) returns (EmbeddingResult) {}
   rpc GenerateImage(GenerateImageRequest) returns (Result) {}
   rpc AudioTranscription(TranscriptRequest) returns (TranscriptResult) {}
   rpc TTS(TTSRequest) returns (Result) {}

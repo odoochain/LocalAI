@@ -12,7 +12,7 @@ type LLM interface {
 	Locking() bool
 	Predict(*pb.PredictOptions) (string, error)
 	PredictStream(*pb.PredictOptions, chan string) error
-	Load(*pb.ModelOptions) error
+	LoadModel(*pb.ModelOptions) error
 	Embeddings(*pb.PredictOptions) ([]float32, error)
 	GenerateImage(*pb.GenerateImageRequest) error
 	AudioTranscription(*pb.TranscriptRequest) (schema.TranscriptionResult, error)

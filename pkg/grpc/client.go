@@ -87,7 +87,7 @@ func (c *Client) Embeddings(ctx context.Context, in *pb.PredictOptions, opts ...
 	defer conn.Close()
 	client := pb.NewBackendClient(conn)
 
-	return client.Embedding(ctx, in, opts...)
+	return client.Embeddings(ctx, in, opts...)
 }
 
 func (c *Client) Predict(ctx context.Context, in *pb.PredictOptions, opts ...grpc.CallOption) (*pb.Reply, error) {

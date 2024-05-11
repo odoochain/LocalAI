@@ -26,7 +26,7 @@ func (e *embedBackend) HealthCheck(ctx context.Context) (bool, error) {
 }
 
 func (e *embedBackend) Embeddings(ctx context.Context, in *pb.PredictOptions, opts ...grpc.CallOption) (*pb.EmbeddingResult, error) {
-	return e.s.Embedding(ctx, in)
+	return e.s.Embeddings(ctx, in)
 }
 
 func (e *embedBackend) Predict(ctx context.Context, in *pb.PredictOptions, opts ...grpc.CallOption) (*pb.Reply, error) {

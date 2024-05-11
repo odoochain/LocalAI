@@ -29,7 +29,7 @@ func (s *server) Health(ctx context.Context, in *pb.HealthMessage) (*pb.Reply, e
 	return newReply("OK"), nil
 }
 
-func (s *server) Embedding(ctx context.Context, in *pb.PredictOptions) (*pb.EmbeddingResult, error) {
+func (s *server) Embeddings(ctx context.Context, in *pb.PredictOptions) (*pb.EmbeddingResult, error) {
 	if s.llm.Locking() {
 		s.llm.Lock()
 		defer s.llm.Unlock()
@@ -47,7 +47,7 @@ func (s *server) LoadModel(ctx context.Context, in *pb.ModelOptions) (*pb.Result
 		s.llm.Lock()
 		defer s.llm.Unlock()
 	}
-	err := s.llm.Load(in)
+	err := s.llm.LoadModel(in)
 	if err != nil {
 		return &pb.Result{Message: fmt.Sprintf("Error loading model: %s", err.Error()), Success: false}, err
 	}

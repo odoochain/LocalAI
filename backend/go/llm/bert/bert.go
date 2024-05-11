@@ -14,7 +14,7 @@ type Embeddings struct {
 	bert *bert.Bert
 }
 
-func (llm *Embeddings) Load(opts *pb.ModelOptions) error {
+func (llm *Embeddings) LoadModel(opts *pb.ModelOptions) error {
 	model, err := bert.New(opts.ModelFile)
 	llm.bert = model
 	return err
