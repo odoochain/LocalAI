@@ -13,14 +13,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-skynet/LocalAI/core/config"
-	"github.com/go-skynet/LocalAI/core/schema"
 	"github.com/google/uuid"
+	"github.com/mudler/LocalAI/core/config"
+	"github.com/mudler/LocalAI/core/schema"
 
-	"github.com/go-skynet/LocalAI/core/backend"
+	"github.com/mudler/LocalAI/core/backend"
 
-	model "github.com/go-skynet/LocalAI/pkg/model"
 	"github.com/gofiber/fiber/v2"
+	model "github.com/mudler/LocalAI/pkg/model"
 	"github.com/rs/zerolog/log"
 )
 
@@ -66,7 +66,7 @@ func downloadFile(url string) (string, error) {
 // @Router /v1/images/generations [post]
 func ImageEndpoint(cl *config.BackendConfigLoader, ml *model.ModelLoader, appConfig *config.ApplicationConfig) func(c *fiber.Ctx) error {
 	return func(c *fiber.Ctx) error {
-		m, input, err := readRequest(c, ml, appConfig, false)
+		m, input, err := readRequest(c, cl, ml, appConfig, false)
 		if err != nil {
 			return fmt.Errorf("failed reading parameters from request:%w", err)
 		}
@@ -149,10 +149,8 @@ func ImageEndpoint(cl *config.BackendConfigLoader, ml *model.ModelLoader, appCon
 			return fmt.Errorf("invalid value for 'size'")
 		}
 
-		b64JSON := false
-		if input.ResponseFormat.Type == "b64_json" {
-			b64JSON = true
-		}
+		b64JSON := config.ResponseFormat == "b64_json"
+
 		// src and clip_skip
 		var result []schema.Item
 		for _, i := range config.PromptStrings {

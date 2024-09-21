@@ -8,7 +8,7 @@ import (
 	"sync"
 	"text/template"
 
-	"github.com/go-skynet/LocalAI/pkg/utils"
+	"github.com/mudler/LocalAI/pkg/utils"
 
 	"github.com/Masterminds/sprig/v3"
 )
@@ -82,6 +82,7 @@ func (tc *TemplateCache) loadTemplateIfExists(templateType TemplateType, templat
 		return fmt.Errorf("template file outside path: %s", file)
 	}
 
+	// can either be a file in the system or a string with the template
 	if utils.ExistsInPath(tc.templatesPath, modelTemplateFile) {
 		d, err := os.ReadFile(file)
 		if err != nil {

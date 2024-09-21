@@ -2,35 +2,54 @@ package downloader
 
 import (
 	"crypto/sha256"
-	"encoding/base64"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 
-	"github.com/go-skynet/LocalAI/pkg/utils"
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
+
+	"github.com/mudler/LocalAI/pkg/oci"
+	"github.com/mudler/LocalAI/pkg/utils"
 	"github.com/rs/zerolog/log"
 )
 
 const (
 	HuggingFacePrefix = "huggingface://"
+	OCIPrefix         = "oci://"
+	OllamaPrefix      = "ollama://"
 	HTTPPrefix        = "http://"
 	HTTPSPrefix       = "https://"
 	GithubURI         = "github:"
 	GithubURI2        = "github://"
+	LocalPrefix       = "file://"
 )
 
-func GetURI(url string, f func(url string, i []byte) error) error {
-	url = ConvertURL(url)
+type URI string
 
-	if strings.HasPrefix(url, "file://") {
-		rawURL := strings.TrimPrefix(url, "file://")
+func (uri URI) DownloadAndUnmarshal(basePath string, f func(url string, i []byte) error) error {
+	url := uri.ResolveURL()
+
+	if strings.HasPrefix(url, LocalPrefix) {
+		rawURL := strings.TrimPrefix(url, LocalPrefix)
 		// checks if the file is symbolic, and resolve if so - otherwise, this function returns the path unmodified.
 		resolvedFile, err := filepath.EvalSymlinks(rawURL)
 		if err != nil {
+			return err
+		}
+		// ???
+		resolvedBasePath, err := filepath.EvalSymlinks(basePath)
+		if err != nil {
+			return err
+		}
+		// Check if the local file is rooted in basePath
+		err = utils.InTrustedRoot(resolvedFile, resolvedBasePath)
+		if err != nil {
+			log.Debug().Str("resolvedFile", resolvedFile).Str("basePath", basePath).Msg("downloader.GetURI blocked an attempt to ready a file url outside of basePath")
 			return err
 		}
 		// Read the response body
@@ -60,18 +79,54 @@ func GetURI(url string, f func(url string, i []byte) error) error {
 	return f(url, body)
 }
 
-func LooksLikeURL(s string) bool {
-	return strings.HasPrefix(s, HTTPPrefix) ||
-		strings.HasPrefix(s, HTTPSPrefix) ||
-		strings.HasPrefix(s, HuggingFacePrefix) ||
-		strings.HasPrefix(s, GithubURI) ||
-		strings.HasPrefix(s, GithubURI2)
+func (u URI) FilenameFromUrl() (string, error) {
+	f, err := filenameFromUrl(string(u))
+	if err != nil || f == "" {
+		f = utils.MD5(string(u))
+		if strings.HasSuffix(string(u), ".yaml") || strings.HasSuffix(string(u), ".yml") {
+			f = f + ".yaml"
+		}
+		err = nil
+	}
+
+	return f, err
 }
 
-func ConvertURL(s string) string {
+func filenameFromUrl(urlstr string) (string, error) {
+	// strip anything after @
+	if strings.Contains(urlstr, "@") {
+		urlstr = strings.Split(urlstr, "@")[0]
+	}
+
+	u, err := url.Parse(urlstr)
+	if err != nil {
+		return "", fmt.Errorf("error due to parsing url: %w", err)
+	}
+	x, err := url.QueryUnescape(u.EscapedPath())
+	if err != nil {
+		return "", fmt.Errorf("error due to escaping: %w", err)
+	}
+	return filepath.Base(x), nil
+}
+
+func (u URI) LooksLikeURL() bool {
+	return strings.HasPrefix(string(u), HTTPPrefix) ||
+		strings.HasPrefix(string(u), HTTPSPrefix) ||
+		strings.HasPrefix(string(u), HuggingFacePrefix) ||
+		strings.HasPrefix(string(u), GithubURI) ||
+		strings.HasPrefix(string(u), OllamaPrefix) ||
+		strings.HasPrefix(string(u), OCIPrefix) ||
+		strings.HasPrefix(string(u), GithubURI2)
+}
+
+func (s URI) LooksLikeOCI() bool {
+	return strings.HasPrefix(string(s), OCIPrefix) || strings.HasPrefix(string(s), OllamaPrefix)
+}
+
+func (s URI) ResolveURL() string {
 	switch {
-	case strings.HasPrefix(s, GithubURI2):
-		repository := strings.Replace(s, GithubURI2, "", 1)
+	case strings.HasPrefix(string(s), GithubURI2):
+		repository := strings.Replace(string(s), GithubURI2, "", 1)
 
 		repoParts := strings.Split(repository, "@")
 		branch := "main"
@@ -86,8 +141,8 @@ func ConvertURL(s string) string {
 		projectPath := strings.Join(repoPath[2:], "/")
 
 		return fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s/%s", org, project, branch, projectPath)
-	case strings.HasPrefix(s, GithubURI):
-		parts := strings.Split(s, ":")
+	case strings.HasPrefix(string(s), GithubURI):
+		parts := strings.Split(string(s), ":")
 		repoParts := strings.Split(parts[1], "@")
 		branch := "main"
 
@@ -101,12 +156,13 @@ func ConvertURL(s string) string {
 		projectPath := strings.Join(repoPath[2:], "/")
 
 		return fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s/%s", org, project, branch, projectPath)
-	case strings.HasPrefix(s, HuggingFacePrefix):
-		repository := strings.Replace(s, HuggingFacePrefix, "", 1)
+	case strings.HasPrefix(string(s), HuggingFacePrefix):
+		repository := strings.Replace(string(s), HuggingFacePrefix, "", 1)
 		// convert repository to a full URL.
 		// e.g. TheBloke/Mixtral-8x7B-v0.1-GGUF/mixtral-8x7b-v0.1.Q2_K.gguf@main -> https://huggingface.co/TheBloke/Mixtral-8x7B-v0.1-GGUF/resolve/main/mixtral-8x7b-v0.1.Q2_K.gguf
 		owner := strings.Split(repository, "/")[0]
 		repo := strings.Split(repository, "/")[1]
+
 		branch := "main"
 		if strings.Contains(repo, "@") {
 			branch = strings.Split(repository, "@")[1]
@@ -119,7 +175,7 @@ func ConvertURL(s string) string {
 		return fmt.Sprintf("https://huggingface.co/%s/%s/resolve/%s/%s", owner, repo, branch, filepath)
 	}
 
-	return s
+	return string(s)
 }
 
 func removePartialFile(tmpFilePath string) error {
@@ -136,8 +192,34 @@ func removePartialFile(tmpFilePath string) error {
 	return nil
 }
 
-func DownloadFile(url string, filePath, sha string, fileN, total int, downloadStatus func(string, string, string, float64)) error {
-	url = ConvertURL(url)
+func (uri URI) DownloadFile(filePath, sha string, fileN, total int, downloadStatus func(string, string, string, float64)) error {
+	url := uri.ResolveURL()
+	if uri.LooksLikeOCI() {
+		progressStatus := func(desc ocispec.Descriptor) io.Writer {
+			return &progressWriter{
+				fileName:       filePath,
+				total:          desc.Size,
+				hash:           sha256.New(),
+				fileNo:         fileN,
+				totalFiles:     total,
+				downloadStatus: downloadStatus,
+			}
+		}
+
+		if strings.HasPrefix(url, OllamaPrefix) {
+			url = strings.TrimPrefix(url, OllamaPrefix)
+			return oci.OllamaFetchModel(url, filePath, progressStatus)
+		}
+
+		url = strings.TrimPrefix(url, OCIPrefix)
+		img, err := oci.GetImage(url, "", nil, nil)
+		if err != nil {
+			return fmt.Errorf("failed to get image %q: %v", url, err)
+		}
+
+		return oci.ExtractOCIImage(img, filepath.Dir(filePath))
+	}
+
 	// Check if the file already exists
 	_, err := os.Stat(filePath)
 	if err == nil {
@@ -245,37 +327,6 @@ func DownloadFile(url string, filePath, sha string, fileN, total int, downloadSt
 	}
 
 	return nil
-}
-
-// this function check if the string is an URL, if it's an URL downloads the image in memory
-// encodes it in base64 and returns the base64 string
-func GetBase64Image(s string) (string, error) {
-	if strings.HasPrefix(s, "http") {
-		// download the image
-		resp, err := http.Get(s)
-		if err != nil {
-			return "", err
-		}
-		defer resp.Body.Close()
-
-		// read the image data into memory
-		data, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return "", err
-		}
-
-		// encode the image data in base64
-		encoded := base64.StdEncoding.EncodeToString(data)
-
-		// return the base64 string
-		return encoded, nil
-	}
-
-	// if the string instead is prefixed with "data:image/jpeg;base64,", drop it
-	if strings.HasPrefix(s, "data:image/jpeg;base64,") {
-		return strings.ReplaceAll(s, "data:image/jpeg;base64,", ""), nil
-	}
-	return "", fmt.Errorf("not valid string")
 }
 
 func formatBytes(bytes int64) string {

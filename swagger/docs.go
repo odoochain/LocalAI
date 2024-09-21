@@ -22,7 +22,334 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
+        "/api/p2p": {
+            "get": {
+                "summary": "Returns available P2P nodes",
+                "responses": {
+                    "200": {
+                        "description": "Response",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/schema.P2PNodesResponse"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/p2p/token": {
+            "get": {
+                "summary": "Show the P2P token",
+                "responses": {
+                    "200": {
+                        "description": "Response",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/backend/monitor": {
+            "get": {
+                "summary": "Backend monitor endpoint",
+                "parameters": [
+                    {
+                        "description": "Backend statistics request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/schema.BackendMonitorRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Response",
+                        "schema": {
+                            "$ref": "#/definitions/proto.StatusResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/backend/shutdown": {
+            "post": {
+                "summary": "Backend monitor endpoint",
+                "parameters": [
+                    {
+                        "description": "Backend statistics request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/schema.BackendMonitorRequest"
+                        }
+                    }
+                ],
+                "responses": {}
+            }
+        },
+        "/metrics": {
+            "get": {
+                "summary": "Prometheus metrics endpoint",
+                "parameters": [
+                    {
+                        "description": "Gallery details",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/config.Gallery"
+                        }
+                    }
+                ],
+                "responses": {}
+            }
+        },
+        "/models/apply": {
+            "post": {
+                "summary": "Install models to LocalAI.",
+                "parameters": [
+                    {
+                        "description": "query params",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/localai.GalleryModel"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Response",
+                        "schema": {
+                            "$ref": "#/definitions/schema.GalleryResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/models/available": {
+            "get": {
+                "summary": "List installable models.",
+                "responses": {
+                    "200": {
+                        "description": "Response",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/gallery.GalleryModel"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/models/delete/{name}": {
+            "post": {
+                "summary": "delete models to LocalAI.",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Model name",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Response",
+                        "schema": {
+                            "$ref": "#/definitions/schema.GalleryResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/models/galleries": {
+            "get": {
+                "summary": "List all Galleries",
+                "responses": {
+                    "200": {
+                        "description": "Response",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/config.Gallery"
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "summary": "Adds a gallery in LocalAI",
+                "parameters": [
+                    {
+                        "description": "Gallery details",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/config.Gallery"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Response",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/config.Gallery"
+                            }
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "summary": "removes a gallery from LocalAI",
+                "parameters": [
+                    {
+                        "description": "Gallery details",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/config.Gallery"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Response",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/config.Gallery"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/models/jobs": {
+            "get": {
+                "summary": "Returns all the jobs status progress",
+                "responses": {
+                    "200": {
+                        "description": "Response",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/gallery.GalleryOpStatus"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/models/jobs/{uuid}": {
+            "get": {
+                "summary": "Returns the job status",
+                "responses": {
+                    "200": {
+                        "description": "Response",
+                        "schema": {
+                            "$ref": "#/definitions/gallery.GalleryOpStatus"
+                        }
+                    }
+                }
+            }
+        },
+        "/system": {
+            "get": {
+                "summary": "Show the LocalAI instance information",
+                "responses": {
+                    "200": {
+                        "description": "Response",
+                        "schema": {
+                            "$ref": "#/definitions/schema.SystemInformationResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/tts": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "audio/x-wav"
+                ],
+                "summary": "Generates audio from the input text.",
+                "parameters": [
+                    {
+                        "description": "query params",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/schema.TTSRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "generated audio/wav file",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
         "/v1/assistants": {
+            "get": {
+                "summary": "List available assistents",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Limit the number of assistants returned",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Order of assistants returned",
+                        "name": "order",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Return assistants created after the given ID",
+                        "name": "after",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Return assistants created before the given ID",
+                        "name": "before",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Response",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/openai.Assistant"
+                            }
+                        }
+                    }
+                }
+            },
             "post": {
                 "summary": "Create an assistant with a model and instructions.",
                 "parameters": [
@@ -46,8 +373,38 @@ const docTemplate = `{
                 }
             }
         },
+        "/v1/assistants/{assistant_id}": {
+            "get": {
+                "summary": "Get assistent data",
+                "responses": {
+                    "200": {
+                        "description": "Response",
+                        "schema": {
+                            "$ref": "#/definitions/openai.Assistant"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "summary": "Delete assistents",
+                "responses": {
+                    "200": {
+                        "description": "Response",
+                        "schema": {
+                            "$ref": "#/definitions/schema.DeleteAssistantResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/v1/audio/speech": {
             "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "audio/x-wav"
+                ],
                 "summary": "Generates audio from the input text.",
                 "parameters": [
                     {
@@ -62,7 +419,7 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "200": {
-                        "description": "Response",
+                        "description": "generated audio/wav file",
                         "schema": {
                             "type": "string"
                         }
@@ -153,6 +510,30 @@ const docTemplate = `{
                 }
             }
         },
+        "/v1/edits": {
+            "post": {
+                "summary": "OpenAI edit endpoint",
+                "parameters": [
+                    {
+                        "description": "query params",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/schema.OpenAIRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Response",
+                        "schema": {
+                            "$ref": "#/definitions/schema.OpenAIResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/v1/embeddings": {
             "post": {
                 "summary": "Get a vector representation of a given input that can be easily consumed by machine learning models and algorithms.",
@@ -177,6 +558,56 @@ const docTemplate = `{
                 }
             }
         },
+        "/v1/files": {
+            "get": {
+                "summary": "List files.",
+                "responses": {
+                    "200": {
+                        "description": "Response",
+                        "schema": {
+                            "$ref": "#/definitions/schema.ListFiles"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/files/{file_id}": {
+            "get": {
+                "summary": "Returns information about a specific file.",
+                "responses": {
+                    "200": {
+                        "description": "Response",
+                        "schema": {
+                            "$ref": "#/definitions/schema.File"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "summary": "Delete a file.",
+                "responses": {
+                    "200": {
+                        "description": "Response",
+                        "schema": {
+                            "$ref": "#/definitions/openai.DeleteStatus"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/files/{file_id}/content": {
+            "get": {
+                "summary": "Returns information about a specific file.",
+                "responses": {
+                    "200": {
+                        "description": "file",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
         "/v1/images/generations": {
             "post": {
                 "summary": "Creates an image given a prompt.",
@@ -196,6 +627,67 @@ const docTemplate = `{
                         "description": "Response",
                         "schema": {
                             "$ref": "#/definitions/schema.OpenAIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/models": {
+            "get": {
+                "summary": "List and describe the various models available in the API.",
+                "responses": {
+                    "200": {
+                        "description": "Response",
+                        "schema": {
+                            "$ref": "#/definitions/schema.ModelsDataResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/rerank": {
+            "post": {
+                "summary": "Reranks a list of phrases by relevance to a given text query.",
+                "parameters": [
+                    {
+                        "description": "query params",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/schema.JINARerankRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Response",
+                        "schema": {
+                            "$ref": "#/definitions/schema.JINARerankResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/sound-generation": {
+            "post": {
+                "summary": "Generates audio from the input text.",
+                "parameters": [
+                    {
+                        "description": "query params",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/schema.ElevenLabsSoundGenerationRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Response",
+                        "schema": {
+                            "type": "string"
                         }
                     }
                 }
@@ -234,14 +726,13 @@ const docTemplate = `{
         }
     },
     "definitions": {
-        "functions.Argument": {
+        "config.Gallery": {
             "type": "object",
             "properties": {
-                "properties": {
-                    "type": "object",
-                    "additionalProperties": true
+                "name": {
+                    "type": "string"
                 },
-                "type": {
+                "url": {
                     "type": "string"
                 }
             }
@@ -258,14 +749,9 @@ const docTemplate = `{
                 "parameters": {
                     "type": "object",
                     "additionalProperties": true
-                }
-            }
-        },
-        "functions.FunctionName": {
-            "type": "object",
-            "properties": {
-                "const": {
-                    "type": "string"
+                },
+                "strict": {
+                    "type": "boolean"
                 }
             }
         },
@@ -273,7 +759,8 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "properties": {
-                    "$ref": "#/definitions/functions.Properties"
+                    "type": "object",
+                    "additionalProperties": true
                 },
                 "type": {
                     "type": "string"
@@ -301,17 +788,6 @@ const docTemplate = `{
                 }
             }
         },
-        "functions.Properties": {
-            "type": "object",
-            "properties": {
-                "arguments": {
-                    "$ref": "#/definitions/functions.Argument"
-                },
-                "function": {
-                    "$ref": "#/definitions/functions.FunctionName"
-                }
-            }
-        },
         "functions.Tool": {
             "type": "object",
             "properties": {
@@ -320,6 +796,179 @@ const docTemplate = `{
                 },
                 "type": {
                     "type": "string"
+                }
+            }
+        },
+        "gallery.File": {
+            "type": "object",
+            "properties": {
+                "filename": {
+                    "type": "string"
+                },
+                "sha256": {
+                    "type": "string"
+                },
+                "uri": {
+                    "type": "string"
+                }
+            }
+        },
+        "gallery.GalleryModel": {
+            "type": "object",
+            "properties": {
+                "config_file": {
+                    "description": "config_file is read in the situation where URL is blank - and therefore this is a base config.",
+                    "type": "object",
+                    "additionalProperties": true
+                },
+                "description": {
+                    "type": "string"
+                },
+                "files": {
+                    "description": "AdditionalFiles are used to add additional files to the model",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/gallery.File"
+                    }
+                },
+                "gallery": {
+                    "description": "Gallery is a reference to the gallery which contains the model",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/config.Gallery"
+                        }
+                    ]
+                },
+                "icon": {
+                    "type": "string"
+                },
+                "installed": {
+                    "description": "Installed is used to indicate if the model is installed or not",
+                    "type": "boolean"
+                },
+                "license": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "overrides": {
+                    "description": "Overrides are used to override the configuration of the model located at URL",
+                    "type": "object",
+                    "additionalProperties": true
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "url": {
+                    "type": "string"
+                },
+                "urls": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "gallery.GalleryOpStatus": {
+            "type": "object",
+            "properties": {
+                "deletion": {
+                    "description": "Deletion is true if the operation is a deletion",
+                    "type": "boolean"
+                },
+                "downloaded_size": {
+                    "type": "string"
+                },
+                "error": {},
+                "file_name": {
+                    "type": "string"
+                },
+                "file_size": {
+                    "type": "string"
+                },
+                "gallery_model_name": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "processed": {
+                    "type": "boolean"
+                },
+                "progress": {
+                    "type": "number"
+                }
+            }
+        },
+        "localai.GalleryModel": {
+            "type": "object",
+            "properties": {
+                "config_file": {
+                    "description": "config_file is read in the situation where URL is blank - and therefore this is a base config.",
+                    "type": "object",
+                    "additionalProperties": true
+                },
+                "config_url": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "files": {
+                    "description": "AdditionalFiles are used to add additional files to the model",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/gallery.File"
+                    }
+                },
+                "gallery": {
+                    "description": "Gallery is a reference to the gallery which contains the model",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/config.Gallery"
+                        }
+                    ]
+                },
+                "icon": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "installed": {
+                    "description": "Installed is used to indicate if the model is installed or not",
+                    "type": "boolean"
+                },
+                "license": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "overrides": {
+                    "description": "Overrides are used to override the configuration of the model located at URL",
+                    "type": "object",
+                    "additionalProperties": true
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "url": {
+                    "type": "string"
+                },
+                "urls": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 }
             }
         },
@@ -412,6 +1061,20 @@ const docTemplate = `{
                 }
             }
         },
+        "openai.DeleteStatus": {
+            "type": "object",
+            "properties": {
+                "deleted": {
+                    "type": "boolean"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "object": {
+                    "type": "string"
+                }
+            }
+        },
         "openai.Tool": {
             "type": "object",
             "properties": {
@@ -433,10 +1096,70 @@ const docTemplate = `{
                 "Function"
             ]
         },
-        "schema.ChatCompletionResponseFormat": {
+        "p2p.NodeData": {
             "type": "object",
             "properties": {
-                "type": {
+                "id": {
+                    "type": "string"
+                },
+                "lastSeen": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "serviceID": {
+                    "type": "string"
+                },
+                "tunnelAddress": {
+                    "type": "string"
+                }
+            }
+        },
+        "proto.MemoryUsageData": {
+            "type": "object",
+            "properties": {
+                "breakdown": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer"
+                    }
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "proto.StatusResponse": {
+            "type": "object",
+            "properties": {
+                "memory": {
+                    "$ref": "#/definitions/proto.MemoryUsageData"
+                },
+                "state": {
+                    "$ref": "#/definitions/proto.StatusResponse_State"
+                }
+            }
+        },
+        "proto.StatusResponse_State": {
+            "type": "integer",
+            "enum": [
+                0,
+                1,
+                2,
+                -1
+            ],
+            "x-enum-varnames": [
+                "StatusResponse_UNINITIALIZED",
+                "StatusResponse_BUSY",
+                "StatusResponse_READY",
+                "StatusResponse_ERROR"
+            ]
+        },
+        "schema.BackendMonitorRequest": {
+            "type": "object",
+            "properties": {
+                "model": {
                     "type": "string"
                 }
             }
@@ -461,6 +1184,69 @@ const docTemplate = `{
                 }
             }
         },
+        "schema.DeleteAssistantResponse": {
+            "type": "object",
+            "properties": {
+                "deleted": {
+                    "type": "boolean"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "object": {
+                    "type": "string"
+                }
+            }
+        },
+        "schema.ElevenLabsSoundGenerationRequest": {
+            "type": "object",
+            "properties": {
+                "do_sample": {
+                    "type": "boolean"
+                },
+                "duration_seconds": {
+                    "type": "number"
+                },
+                "model_id": {
+                    "type": "string"
+                },
+                "prompt_influence": {
+                    "type": "number"
+                },
+                "text": {
+                    "type": "string"
+                }
+            }
+        },
+        "schema.File": {
+            "type": "object",
+            "properties": {
+                "bytes": {
+                    "description": "Size of the file in bytes",
+                    "type": "integer"
+                },
+                "created_at": {
+                    "description": "The time at which the file was created",
+                    "type": "string"
+                },
+                "filename": {
+                    "description": "The name of the file",
+                    "type": "string"
+                },
+                "id": {
+                    "description": "Unique identifier for the file",
+                    "type": "string"
+                },
+                "object": {
+                    "description": "Type of the object (e.g., \"file\")",
+                    "type": "string"
+                },
+                "purpose": {
+                    "description": "The purpose of the file (e.g., \"fine-tune\", \"classifications\", etc.)",
+                    "type": "string"
+                }
+            }
+        },
         "schema.FunctionCall": {
             "type": "object",
             "properties": {
@@ -468,6 +1254,17 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "schema.GalleryResponse": {
+            "type": "object",
+            "properties": {
+                "status": {
+                    "type": "string"
+                },
+                "uuid": {
                     "type": "string"
                 }
             }
@@ -496,6 +1293,90 @@ const docTemplate = `{
                 }
             }
         },
+        "schema.JINADocumentResult": {
+            "type": "object",
+            "properties": {
+                "document": {
+                    "$ref": "#/definitions/schema.JINAText"
+                },
+                "index": {
+                    "type": "integer"
+                },
+                "relevance_score": {
+                    "type": "number"
+                }
+            }
+        },
+        "schema.JINARerankRequest": {
+            "type": "object",
+            "properties": {
+                "documents": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "model": {
+                    "type": "string"
+                },
+                "query": {
+                    "type": "string"
+                },
+                "top_n": {
+                    "type": "integer"
+                }
+            }
+        },
+        "schema.JINARerankResponse": {
+            "type": "object",
+            "properties": {
+                "model": {
+                    "type": "string"
+                },
+                "results": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/schema.JINADocumentResult"
+                    }
+                },
+                "usage": {
+                    "$ref": "#/definitions/schema.JINAUsageInfo"
+                }
+            }
+        },
+        "schema.JINAText": {
+            "type": "object",
+            "properties": {
+                "text": {
+                    "type": "string"
+                }
+            }
+        },
+        "schema.JINAUsageInfo": {
+            "type": "object",
+            "properties": {
+                "prompt_tokens": {
+                    "type": "integer"
+                },
+                "total_tokens": {
+                    "type": "integer"
+                }
+            }
+        },
+        "schema.ListFiles": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/schema.File"
+                    }
+                },
+                "object": {
+                    "type": "string"
+                }
+            }
+        },
         "schema.Message": {
             "type": "object",
             "properties": {
@@ -513,10 +1394,22 @@ const docTemplate = `{
                     "description": "The message role",
                     "type": "string"
                 },
+                "string_audios": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "string_content": {
                     "type": "string"
                 },
                 "string_images": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "string_videos": {
                     "type": "array",
                     "items": {
                         "type": "string"
@@ -527,6 +1420,31 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/schema.ToolCall"
                     }
+                }
+            }
+        },
+        "schema.ModelsDataResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/schema.OpenAIModel"
+                    }
+                },
+                "object": {
+                    "type": "string"
+                }
+            }
+        },
+        "schema.OpenAIModel": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "object": {
+                    "type": "string"
                 }
             }
         },
@@ -627,16 +1545,14 @@ const docTemplate = `{
                 "prompt": {
                     "description": "Prompt is read only by completion/image API calls"
                 },
+                "repeat_last_n": {
+                    "type": "integer"
+                },
                 "repeat_penalty": {
                     "type": "number"
                 },
                 "response_format": {
-                    "description": "whisper/image",
-                    "allOf": [
-                        {
-                            "$ref": "#/definitions/schema.ChatCompletionResponseFormat"
-                        }
-                    ]
+                    "description": "whisper/image"
                 },
                 "rope_freq_base": {
                     "type": "number"
@@ -681,6 +1597,10 @@ const docTemplate = `{
                 "top_p": {
                     "description": "Common options between all the API calls, part of the OpenAI spec",
                     "type": "number"
+                },
+                "translate": {
+                    "description": "Only for audio transcription",
+                    "type": "boolean"
                 },
                 "typical_p": {
                     "type": "number"
@@ -737,19 +1657,55 @@ const docTemplate = `{
                 }
             }
         },
+        "schema.P2PNodesResponse": {
+            "type": "object",
+            "properties": {
+                "federated_nodes": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/p2p.NodeData"
+                    }
+                },
+                "nodes": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/p2p.NodeData"
+                    }
+                }
+            }
+        },
+        "schema.SystemInformationResponse": {
+            "type": "object",
+            "properties": {
+                "backends": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
         "schema.TTSRequest": {
+            "description": "TTS request body",
             "type": "object",
             "properties": {
                 "backend": {
                     "type": "string"
                 },
                 "input": {
+                    "description": "text input",
+                    "type": "string"
+                },
+                "language": {
+                    "description": "(optional) language to use with TTS model",
                     "type": "string"
                 },
                 "model": {
+                    "description": "model name or full path",
                     "type": "string"
                 },
                 "voice": {
+                    "description": "voice audio file or speaker id",
                     "type": "string"
                 }
             }

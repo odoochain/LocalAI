@@ -8,14 +8,14 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/go-skynet/LocalAI/core/backend"
-	"github.com/go-skynet/LocalAI/core/config"
+	"github.com/mudler/LocalAI/core/backend"
+	"github.com/mudler/LocalAI/core/config"
 
-	"github.com/go-skynet/LocalAI/core/schema"
-	"github.com/go-skynet/LocalAI/pkg/functions"
-	model "github.com/go-skynet/LocalAI/pkg/model"
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
+	"github.com/mudler/LocalAI/core/schema"
+	"github.com/mudler/LocalAI/pkg/functions"
+	model "github.com/mudler/LocalAI/pkg/model"
 	"github.com/rs/zerolog/log"
 	"github.com/valyala/fasthttp"
 )
@@ -57,7 +57,7 @@ func CompletionEndpoint(cl *config.BackendConfigLoader, ml *model.ModelLoader, a
 	}
 
 	return func(c *fiber.Ctx) error {
-		modelFile, input, err := readRequest(c, ml, appConfig, true)
+		modelFile, input, err := readRequest(c, cl, ml, appConfig, true)
 		if err != nil {
 			return fmt.Errorf("failed reading parameters from request:%w", err)
 		}
@@ -69,8 +69,13 @@ func CompletionEndpoint(cl *config.BackendConfigLoader, ml *model.ModelLoader, a
 			return fmt.Errorf("failed reading parameters from request:%w", err)
 		}
 
-		if input.ResponseFormat.Type == "json_object" {
-			input.Grammar = functions.JSONBNF
+		if config.ResponseFormatMap != nil {
+			d := schema.ChatCompletionResponseFormat{}
+			dat, _ := json.Marshal(config.ResponseFormatMap)
+			_ = json.Unmarshal(dat, &d)
+			if d.Type == "json_object" {
+				input.Grammar = functions.JSONBNF
+			}
 		}
 
 		config.Grammar = input.Grammar
@@ -107,7 +112,8 @@ func CompletionEndpoint(cl *config.BackendConfigLoader, ml *model.ModelLoader, a
 
 			if templateFile != "" {
 				templatedInput, err := ml.EvaluateTemplateForPrompt(model.CompletionPromptTemplate, templateFile, model.PromptTemplateData{
-					Input: predInput,
+					Input:        predInput,
+					SystemPrompt: config.SystemPrompt,
 				})
 				if err == nil {
 					predInput = templatedInput

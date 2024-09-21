@@ -1,21 +1,26 @@
 package localai
 
 import (
-	"github.com/go-skynet/LocalAI/core/config"
-	"github.com/go-skynet/LocalAI/internal"
-	"github.com/go-skynet/LocalAI/pkg/gallery"
-	"github.com/go-skynet/LocalAI/pkg/model"
 	"github.com/gofiber/fiber/v2"
+	"github.com/mudler/LocalAI/core/config"
+	"github.com/mudler/LocalAI/core/gallery"
+	"github.com/mudler/LocalAI/core/p2p"
+	"github.com/mudler/LocalAI/core/services"
+	"github.com/mudler/LocalAI/internal"
+	"github.com/mudler/LocalAI/pkg/model"
 )
 
 func WelcomeEndpoint(appConfig *config.ApplicationConfig,
-	cl *config.BackendConfigLoader, ml *model.ModelLoader) func(*fiber.Ctx) error {
+	cl *config.BackendConfigLoader, ml *model.ModelLoader, modelStatus func() (map[string]string, map[string]string)) func(*fiber.Ctx) error {
 	return func(c *fiber.Ctx) error {
-		models, _ := ml.ListModels()
+		models, _ := services.ListModels(cl, ml, "", true)
 		backendConfigs := cl.GetAllBackendConfigs()
 
 		galleryConfigs := map[string]*gallery.Config{}
+		modelsWithBackendConfig := map[string]interface{}{}
+
 		for _, m := range backendConfigs {
+			modelsWithBackendConfig[m.Name] = nil
 
 			cfg, err := gallery.GetLocalModelConfiguration(ml.ModelPath, m.Name)
 			if err != nil {
@@ -24,13 +29,27 @@ func WelcomeEndpoint(appConfig *config.ApplicationConfig,
 			galleryConfigs[m.Name] = cfg
 		}
 
+		// Get model statuses to display in the UI the operation in progress
+		processingModels, taskTypes := modelStatus()
+
+		modelsWithoutConfig := []string{}
+
+		for _, m := range models {
+			if _, ok := modelsWithBackendConfig[m]; !ok {
+				modelsWithoutConfig = append(modelsWithoutConfig, m)
+			}
+		}
+
 		summary := fiber.Map{
 			"Title":             "LocalAI API - " + internal.PrintableVersion(),
 			"Version":           internal.PrintableVersion(),
-			"Models":            models,
+			"Models":            modelsWithoutConfig,
 			"ModelsConfig":      backendConfigs,
 			"GalleryConfig":     galleryConfigs,
+			"IsP2PEnabled":      p2p.IsP2PEnabled(),
 			"ApplicationConfig": appConfig,
+			"ProcessingModels":  processingModels,
+			"TaskTypes":         taskTypes,
 		}
 
 		if string(c.Context().Request.Header.ContentType()) == "application/json" || len(c.Accepts("html")) == 0 {

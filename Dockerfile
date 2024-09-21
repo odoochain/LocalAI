@@ -1,58 +1,56 @@
 ARG IMAGE_TYPE=extras
 ARG BASE_IMAGE=ubuntu:22.04
 ARG GRPC_BASE_IMAGE=${BASE_IMAGE}
+ARG INTEL_BASE_IMAGE=${BASE_IMAGE}
 
 # The requirements-core target is common to all images.  It should not be placed in requirements-core unless every single build will use it.
 FROM ${BASE_IMAGE} AS requirements-core
 
 USER root
 
-ARG GO_VERSION=1.21.7
+ARG GO_VERSION=1.22.6
 ARG TARGETARCH
 ARG TARGETVARIANT
 
 ENV DEBIAN_FRONTEND=noninteractive
-ENV EXTERNAL_GRPC_BACKENDS="coqui:/build/backend/python/coqui/run.sh,huggingface-embeddings:/build/backend/python/sentencetransformers/run.sh,petals:/build/backend/python/petals/run.sh,transformers:/build/backend/python/transformers/run.sh,sentencetransformers:/build/backend/python/sentencetransformers/run.sh,rerankers:/build/backend/python/rerankers/run.sh,autogptq:/build/backend/python/autogptq/run.sh,bark:/build/backend/python/bark/run.sh,diffusers:/build/backend/python/diffusers/run.sh,exllama:/build/backend/python/exllama/run.sh,vall-e-x:/build/backend/python/vall-e-x/run.sh,vllm:/build/backend/python/vllm/run.sh,mamba:/build/backend/python/mamba/run.sh,exllama2:/build/backend/python/exllama2/run.sh,transformers-musicgen:/build/backend/python/transformers-musicgen/run.sh,parler-tts:/build/backend/python/parler-tts/run.sh"
+ENV EXTERNAL_GRPC_BACKENDS="coqui:/build/backend/python/coqui/run.sh,huggingface-embeddings:/build/backend/python/sentencetransformers/run.sh,transformers:/build/backend/python/transformers/run.sh,sentencetransformers:/build/backend/python/sentencetransformers/run.sh,rerankers:/build/backend/python/rerankers/run.sh,autogptq:/build/backend/python/autogptq/run.sh,bark:/build/backend/python/bark/run.sh,diffusers:/build/backend/python/diffusers/run.sh,openvoice:/build/backend/python/openvoice/run.sh,vall-e-x:/build/backend/python/vall-e-x/run.sh,vllm:/build/backend/python/vllm/run.sh,mamba:/build/backend/python/mamba/run.sh,exllama2:/build/backend/python/exllama2/run.sh,transformers-musicgen:/build/backend/python/transformers-musicgen/run.sh,parler-tts:/build/backend/python/parler-tts/run.sh"
 
-ARG GO_TAGS="stablediffusion tinydream tts"
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         build-essential \
+        ccache \
         ca-certificates \
         cmake \
         curl \
         git \
-        python3-pip \
-        python-is-python3 \
-        unzip && \
+        unzip upx-ucl && \
     apt-get clean && \
-    rm -rf /var/lib/apt/lists/* && \
-    pip install --upgrade pip
+    rm -rf /var/lib/apt/lists/*
 
 # Install Go
 RUN curl -L -s https://go.dev/dl/go${GO_VERSION}.linux-${TARGETARCH}.tar.gz | tar -C /usr/local -xz
-ENV PATH $PATH:/root/go/bin:/usr/local/go/bin
+ENV PATH=$PATH:/root/go/bin:/usr/local/go/bin
 
 # Install grpc compilers
-RUN go install google.golang.org/protobuf/cmd/protoc-gen-go@latest && \
-    go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
-
-# Install grpcio-tools (the version in 22.04 is too old)
-RUN pip install --user grpcio-tools
+RUN go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.34.2 && \
+    go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@1958fcbe2ca8bd93af633f11e97d44e567e945af
 
 COPY --chmod=644 custom-ca-certs/* /usr/local/share/ca-certificates/
 RUN update-ca-certificates
+
+RUN test -n "$TARGETARCH" \
+    || (echo 'warn: missing $TARGETARCH, either set this `ARG` manually, or run using `docker buildkit`')
 
 # Use the variables in subsequent instructions
 RUN echo "Target Architecture: $TARGETARCH"
 RUN echo "Target Variant: $TARGETVARIANT"
 
 # Cuda
-ENV PATH /usr/local/cuda/bin:${PATH}
+ENV PATH=/usr/local/cuda/bin:${PATH}
 
 # HipBLAS requirements
-ENV PATH /opt/rocm/bin:${PATH}
+ENV PATH=/opt/rocm/bin:${PATH}
 
 # OpenBLAS requirements and stable diffusion
 RUN apt-get update && \
@@ -67,37 +65,30 @@ RUN ln -s /usr/include/opencv4/opencv2 /usr/include/opencv2
 
 WORKDIR /build
 
-RUN test -n "$TARGETARCH" \
-    || (echo 'warn: missing $TARGETARCH, either set this `ARG` manually, or run using `docker buildkit`')
-
 ###################################
 ###################################
 
 # The requirements-extras target is for any builds with IMAGE_TYPE=extras. It should not be placed in this target unless every IMAGE_TYPE=extras build will use it
 FROM requirements-core AS requirements-extras
 
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends gpg && \
-    curl https://repo.anaconda.com/pkgs/misc/gpgkeys/anaconda.asc | gpg --dearmor > conda.gpg && \
-    install -o root -g root -m 644 conda.gpg /usr/share/keyrings/conda-archive-keyring.gpg && \
-    gpg --keyring /usr/share/keyrings/conda-archive-keyring.gpg --no-default-keyring --fingerprint 34161F5BF5EB1D4BFBBB8F0A8AEB4F8B29D82806 && \
-    echo "deb [arch=amd64 signed-by=/usr/share/keyrings/conda-archive-keyring.gpg] https://repo.anaconda.com/pkgs/misc/debrepo/conda stable main" > /etc/apt/sources.list.d/conda.list && \
-    echo "deb [arch=amd64 signed-by=/usr/share/keyrings/conda-archive-keyring.gpg] https://repo.anaconda.com/pkgs/misc/debrepo/conda stable main" | tee -a /etc/apt/sources.list.d/conda.list && \
-    apt-get update && \
-    apt-get install -y --no-install-recommends \
-        conda && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
-
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 ENV PATH="/root/.cargo/bin:${PATH}"
 
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         espeak-ng \
-        espeak && \
+        espeak \
+        python3-pip \
+        python-is-python3 \
+        python3-dev llvm \
+        python3-venv && \
     apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+    rm -rf /var/lib/apt/lists/* && \
+    pip install --upgrade pip
+
+# Install grpcio-tools (the version in 22.04 is too old)
+RUN pip install --user grpcio-tools
 
 ###################################
 ###################################
@@ -107,29 +98,53 @@ RUN apt-get update && \
 FROM requirements-${IMAGE_TYPE} AS requirements-drivers
 
 ARG BUILD_TYPE
-ARG CUDA_MAJOR_VERSION=11
-ARG CUDA_MINOR_VERSION=7
+ARG CUDA_MAJOR_VERSION=12
+ARG CUDA_MINOR_VERSION=0
 
 ENV BUILD_TYPE=${BUILD_TYPE}
 
-# CuBLAS requirements
-RUN if [ "${BUILD_TYPE}" = "cublas" ]; then \
+# Vulkan requirements
+RUN <<EOT bash
+    if [ "${BUILD_TYPE}" = "vulkan" ]; then
         apt-get update && \
         apt-get install -y  --no-install-recommends \
-            software-properties-common && \
-        curl -O https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb && \
+            software-properties-common pciutils wget gpg-agent && \
+        wget -qO - https://packages.lunarg.com/lunarg-signing-key-pub.asc | apt-key add - && \
+        wget -qO /etc/apt/sources.list.d/lunarg-vulkan-jammy.list https://packages.lunarg.com/vulkan/lunarg-vulkan-jammy.list && \
+        apt-get update && \
+        apt-get install -y \
+            vulkan-sdk && \
+        apt-get clean && \
+        rm -rf /var/lib/apt/lists/*
+    fi
+EOT
+
+# CuBLAS requirements
+RUN <<EOT bash
+    if [ "${BUILD_TYPE}" = "cublas" ]; then
+        apt-get update && \
+        apt-get install -y  --no-install-recommends \
+            software-properties-common pciutils
+        if [ "amd64" = "$TARGETARCH" ]; then
+            curl -O https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb
+        fi
+        if [ "arm64" = "$TARGETARCH" ]; then
+            curl -O https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/arm64/cuda-keyring_1.1-1_all.deb
+        fi
         dpkg -i cuda-keyring_1.1-1_all.deb && \
         rm -f cuda-keyring_1.1-1_all.deb && \
         apt-get update && \
         apt-get install -y --no-install-recommends \
             cuda-nvcc-${CUDA_MAJOR_VERSION}-${CUDA_MINOR_VERSION} \
+            libcufft-dev-${CUDA_MAJOR_VERSION}-${CUDA_MINOR_VERSION} \
             libcurand-dev-${CUDA_MAJOR_VERSION}-${CUDA_MINOR_VERSION} \
             libcublas-dev-${CUDA_MAJOR_VERSION}-${CUDA_MINOR_VERSION} \
             libcusparse-dev-${CUDA_MAJOR_VERSION}-${CUDA_MINOR_VERSION} \
             libcusolver-dev-${CUDA_MAJOR_VERSION}-${CUDA_MINOR_VERSION} && \
         apt-get clean && \
-        rm -rf /var/lib/apt/lists/* \
-    ; fi
+        rm -rf /var/lib/apt/lists/*
+    fi
+EOT
 
 # If we are building with clblas support, we need the libraries for the builds
 RUN if [ "${BUILD_TYPE}" = "clblas" ]; then \
@@ -155,13 +170,24 @@ RUN if [ "${BUILD_TYPE}" = "hipblas" ]; then \
 ###################################
 ###################################
 
+# Temporary workaround for Intel's repository to work correctly
+# https://community.intel.com/t5/Intel-oneAPI-Math-Kernel-Library/APT-Repository-not-working-signatures-invalid/m-p/1599436/highlight/true#M36143
+# This is a temporary workaround until Intel fixes their repository
+FROM ${INTEL_BASE_IMAGE} AS intel
+RUN wget -qO - https://repositories.intel.com/gpu/intel-graphics.key | \
+gpg --yes --dearmor --output /usr/share/keyrings/intel-graphics.gpg
+RUN echo "deb [arch=amd64 signed-by=/usr/share/keyrings/intel-graphics.gpg] https://repositories.intel.com/gpu/ubuntu jammy/lts/2350 unified" > /etc/apt/sources.list.d/intel-graphics.list
+
+###################################
+###################################
+
 # The grpc target does one thing, it builds and installs GRPC.  This is in it's own layer so that it can be effectively cached by CI.
 # You probably don't need to change anything here, and if you do, make sure that CI is adjusted so that the cache continues to work.
 FROM ${GRPC_BASE_IMAGE} AS grpc
 
 # This is a bit of a hack, but it's required in order to be able to effectively cache this layer in CI
 ARG GRPC_MAKEFLAGS="-j4 -Otarget"
-ARG GRPC_VERSION=v1.58.0
+ARG GRPC_VERSION=v1.65.0
 
 ENV MAKEFLAGS=${GRPC_MAKEFLAGS}
 
@@ -182,6 +208,7 @@ RUN apt-get update && \
 RUN git clone --recurse-submodules --jobs 4 -b ${GRPC_VERSION} --depth 1 --shallow-submodules https://github.com/grpc/grpc && \
     mkdir -p /build/grpc/cmake/build && \
     cd /build/grpc/cmake/build && \
+    sed -i "216i\  TESTONLY" "../../third_party/abseil-cpp/absl/container/CMakeLists.txt" && \
     cmake -DgRPC_INSTALL=ON -DgRPC_BUILD_TESTS=OFF -DCMAKE_INSTALL_PREFIX:PATH=/opt/grpc ../.. && \
     make && \
     make install && \
@@ -190,13 +217,14 @@ RUN git clone --recurse-submodules --jobs 4 -b ${GRPC_VERSION} --depth 1 --shall
 ###################################
 ###################################
 
-# The builder target compiles LocalAI. This target is not the target that will be uploaded to the registry.
-# Adjustments to the build process should likely be made here.
-FROM requirements-drivers AS builder
+# The builder-base target has the arguments, variables, and copies shared between full builder images and the uncompiled devcontainer
 
-ARG GO_TAGS="stablediffusion tts"
+FROM requirements-drivers AS builder-base
+
+ARG GO_TAGS="stablediffusion tts p2p"
 ARG GRPC_BACKENDS
 ARG MAKEFLAGS
+ARG LD_FLAGS="-s -w"
 
 ENV GRPC_BACKENDS=${GRPC_BACKENDS}
 ENV GO_TAGS=${GO_TAGS}
@@ -204,36 +232,119 @@ ENV MAKEFLAGS=${MAKEFLAGS}
 ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
 ENV NVIDIA_REQUIRE_CUDA="cuda>=${CUDA_MAJOR_VERSION}.0"
 ENV NVIDIA_VISIBLE_DEVICES=all
+ENV LD_FLAGS=${LD_FLAGS}
+
+RUN echo "GO_TAGS: $GO_TAGS" && echo "TARGETARCH: $TARGETARCH"
 
 WORKDIR /build
 
-COPY . .
-COPY .git .
-RUN echo "GO_TAGS: $GO_TAGS"
-
-RUN make prepare
 
 # We need protoc installed, and the version in 22.04 is too old.  We will create one as part installing the GRPC build below
 # but that will also being in a newer version of absl which stablediffusion cannot compile with.  This version of protoc is only
 # here so that we can generate the grpc code for the stablediffusion build
-RUN curl -L -s https://github.com/protocolbuffers/protobuf/releases/download/v26.1/protoc-26.1-linux-x86_64.zip -o protoc.zip && \
-    unzip -j -d /usr/local/bin protoc.zip bin/protoc && \
-    rm protoc.zip
+RUN <<EOT bash
+    if [ "amd64" = "$TARGETARCH" ]; then
+        curl -L -s https://github.com/protocolbuffers/protobuf/releases/download/v27.1/protoc-27.1-linux-x86_64.zip -o protoc.zip && \
+        unzip -j -d /usr/local/bin protoc.zip bin/protoc && \
+        rm protoc.zip
+    fi
+    if [ "arm64" = "$TARGETARCH" ]; then
+        curl -L -s https://github.com/protocolbuffers/protobuf/releases/download/v27.1/protoc-27.1-linux-aarch_64.zip -o protoc.zip && \
+        unzip -j -d /usr/local/bin protoc.zip bin/protoc && \
+        rm protoc.zip
+    fi
+EOT
 
-# stablediffusion does not tolerate a newer version of abseil, build it first
-RUN GRPC_BACKENDS=backend-assets/grpc/stablediffusion make build
+
+###################################
+###################################
+
+# This first portion of builder holds the layers specifically used to build backend-assets/grpc/stablediffusion
+# In most cases, builder is the image you should be using - however, this can save build time if one just needs to copy backend-assets/grpc/stablediffusion and nothing else.
+FROM builder-base AS builder-sd
+
+# stablediffusion does not tolerate a newer version of abseil, copy only over enough elements to build it
+COPY Makefile .
+COPY go.mod .
+COPY go.sum .
+COPY backend/backend.proto ./backend/backend.proto
+COPY backend/go/image/stablediffusion ./backend/go/image/stablediffusion
+COPY pkg/grpc ./pkg/grpc
+COPY pkg/stablediffusion ./pkg/stablediffusion
+RUN git init
+RUN make sources/go-stable-diffusion
+RUN touch prepare-sources
+
+# Actually build the backend
+RUN GRPC_BACKENDS=backend-assets/grpc/stablediffusion make backend-assets/grpc/stablediffusion
+
+###################################
+###################################
+
+# The builder target compiles LocalAI. This target is not the target that will be uploaded to the registry.
+# Adjustments to the build process should likely be made here.
+FROM builder-sd AS builder
 
 # Install the pre-built GRPC
 COPY --from=grpc /opt/grpc /usr/local
 
 # Rebuild with defaults backends
 WORKDIR /build
-RUN make build
+
+COPY . .
+COPY .git .
+
+RUN make prepare
+
+## Build the binary
+## If it's CUDA, we want to skip some of the llama-compat backends to save space
+## We only leave the most CPU-optimized variant and the fallback for the cublas build
+## (both will use CUDA for the actual computation)
+RUN if [ "${BUILD_TYPE}" = "cublas" ]; then \
+        SKIP_GRPC_BACKEND="backend-assets/grpc/llama-cpp-avx backend-assets/grpc/llama-cpp-avx2" make build; \
+    else \
+        make build; \
+    fi
 
 RUN if [ ! -d "/build/sources/go-piper/piper-phonemize/pi/lib/" ]; then \
         mkdir -p /build/sources/go-piper/piper-phonemize/pi/lib/ \
         touch /build/sources/go-piper/piper-phonemize/pi/lib/keep \
     ; fi
+
+###################################
+###################################
+
+# The devcontainer target is not used on CI. It is a target for developers to use locally -
+# rather than copying files it mounts them locally and leaves building to the developer
+
+FROM builder-base AS devcontainer
+
+ARG FFMPEG
+
+COPY --from=grpc /opt/grpc /usr/local
+
+COPY --from=builder-sd /build/backend-assets/grpc/stablediffusion /build/backend-assets/grpc/stablediffusion
+
+COPY .devcontainer-scripts /.devcontainer-scripts
+
+# Add FFmpeg
+RUN if [ "${FFMPEG}" = "true" ]; then \
+        apt-get update && \
+        apt-get install -y --no-install-recommends \
+            ffmpeg && \
+        apt-get clean && \
+        rm -rf /var/lib/apt/lists/* \
+    ; fi
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        ssh less && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN go install github.com/go-delve/delve/cmd/dlv@latest
+
+RUN go install github.com/mikefarah/yq/v4@latest
 
 ###################################
 ###################################
@@ -246,6 +357,7 @@ ARG FFMPEG
 ARG BUILD_TYPE
 ARG TARGETARCH
 ARG IMAGE_TYPE=extras
+ARG EXTRA_BACKENDS
 ARG MAKEFLAGS
 
 ENV BUILD_TYPE=${BUILD_TYPE}
@@ -253,11 +365,10 @@ ENV REBUILD=false
 ENV HEALTHCHECK_ENDPOINT=http://localhost:8080/readyz
 ENV MAKEFLAGS=${MAKEFLAGS}
 
-ARG CUDA_MAJOR_VERSION=11
+ARG CUDA_MAJOR_VERSION=12
 ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
 ENV NVIDIA_REQUIRE_CUDA="cuda>=${CUDA_MAJOR_VERSION}.0"
 ENV NVIDIA_VISIBLE_DEVICES=all
-ENV PIP_CACHE_PURGE=true
 
 # Add FFmpeg
 RUN if [ "${FFMPEG}" = "true" ]; then \
@@ -288,53 +399,57 @@ COPY --from=builder /build/local-ai ./
 COPY --from=builder /build/sources/go-piper/piper-phonemize/pi/lib/* /usr/lib/
 
 # do not let stablediffusion rebuild (requires an older version of absl)
-COPY --from=builder /build/backend-assets/grpc/stablediffusion ./backend-assets/grpc/stablediffusion
+COPY --from=builder-sd /build/backend-assets/grpc/stablediffusion ./backend-assets/grpc/stablediffusion
 
-## Duplicated from Makefile to avoid having a big layer that's hard to push
-RUN if [ "${IMAGE_TYPE}" = "extras" ]; then \
-    make -C backend/python/autogptq \
+# Change the shell to bash so we can use [[ tests below
+SHELL ["/bin/bash", "-c"]
+# We try to strike a balance between individual layer size (as that affects total push time) and total image size
+# Splitting the backends into more groups with fewer items results in a larger image, but a smaller size for the largest layer
+# Splitting the backends into fewer groups with more items results in a smaller image, but a larger size for the largest layer
+
+RUN if [[ ( "${EXTRA_BACKENDS}" =~ "coqui" || -z "${EXTRA_BACKENDS}" ) && "$IMAGE_TYPE" == "extras" ]]; then \
+        make -C backend/python/coqui \
+    ; fi && \
+    if [[ ( "${EXTRA_BACKENDS}" =~ "parler-tts" || -z "${EXTRA_BACKENDS}" ) && "$IMAGE_TYPE" == "extras" ]]; then \
+        make -C backend/python/parler-tts \
+    ; fi && \
+    if [[ ( "${EXTRA_BACKENDS}" =~ "diffusers" || -z "${EXTRA_BACKENDS}" ) && "$IMAGE_TYPE" == "extras" ]]; then \
+        make -C backend/python/diffusers \
+    ; fi && \
+    if [[ ( "${EXTRA_BACKENDS}" =~ "transformers-musicgen" || -z "${EXTRA_BACKENDS}" ) && "$IMAGE_TYPE" == "extras" ]]; then \
+        make -C backend/python/transformers-musicgen \
     ; fi
-RUN if [ "${IMAGE_TYPE}" = "extras" ]; then \
-    make -C backend/python/bark \
+
+RUN if [[ ( "${EXTRA_BACKENDS}" =~ "vall-e-x" || -z "${EXTRA_BACKENDS}" ) && "$IMAGE_TYPE" == "extras" ]]; then \
+        make -C backend/python/vall-e-x \
+    ; fi && \
+    if [[ ( "${EXTRA_BACKENDS}" =~ "openvoice" || -z "${EXTRA_BACKENDS}" ) && "$IMAGE_TYPE" == "extras" ]]; then \
+        make -C backend/python/openvoice \
+    ; fi && \
+    if [[ ( "${EXTRA_BACKENDS}" =~ "sentencetransformers" || -z "${EXTRA_BACKENDS}" ) && "$IMAGE_TYPE" == "extras" ]]; then \
+        make -C backend/python/sentencetransformers \
+    ; fi && \
+    if [[ ( "${EXTRA_BACKENDS}" =~ "exllama2" || -z "${EXTRA_BACKENDS}" ) && "$IMAGE_TYPE" == "extras" ]]; then \
+        make -C backend/python/exllama2 \
+    ; fi && \
+    if [[ ( "${EXTRA_BACKENDS}" =~ "transformers" || -z "${EXTRA_BACKENDS}" ) && "$IMAGE_TYPE" == "extras" ]]; then \
+        make -C backend/python/transformers \
     ; fi
-RUN if [ "${IMAGE_TYPE}" = "extras" ]; then \
-    make -C backend/python/diffusers \
-    ; fi
-RUN if [ "${IMAGE_TYPE}" = "extras" ]; then \
-    make -C backend/python/vllm \
-    ; fi
-RUN if [ "${IMAGE_TYPE}" = "extras" ]; then \
-    make -C backend/python/mamba \
-    ; fi
-RUN if [ "${IMAGE_TYPE}" = "extras" ]; then \
-    make -C backend/python/sentencetransformers \
-    ; fi
-RUN if [ "${IMAGE_TYPE}" = "extras" ]; then \
-    make -C backend/python/rerankers \
-    ; fi
-RUN if [ "${IMAGE_TYPE}" = "extras" ]; then \
-    make -C backend/python/transformers \
-    ; fi
-RUN if [ "${IMAGE_TYPE}" = "extras" ]; then \
-    make -C backend/python/vall-e-x \
-    ; fi
-RUN if [ "${IMAGE_TYPE}" = "extras" ]; then \
-    make -C backend/python/exllama \
-    ; fi
-RUN if [ "${IMAGE_TYPE}" = "extras" ]; then \
-    make -C backend/python/exllama2 \
-    ; fi
-RUN if [ "${IMAGE_TYPE}" = "extras" ]; then \
-    make -C backend/python/petals \
-    ; fi
-RUN if [ "${IMAGE_TYPE}" = "extras" ]; then \
-    make -C backend/python/transformers-musicgen \
-    ; fi
-RUN if [ "${IMAGE_TYPE}" = "extras" ]; then \
-    make -C backend/python/parler-tts \
-    ; fi
-RUN if [ "${IMAGE_TYPE}" = "extras" ]; then \
-    make -C backend/python/coqui \
+
+RUN if [[ ( "${EXTRA_BACKENDS}" =~ "vllm" || -z "${EXTRA_BACKENDS}" ) && "$IMAGE_TYPE" == "extras" ]]; then \
+        make -C backend/python/vllm \
+    ; fi && \
+    if [[ ( "${EXTRA_BACKENDS}" =~ "autogptq" || -z "${EXTRA_BACKENDS}" ) && "$IMAGE_TYPE" == "extras" ]]; then \
+        make -C backend/python/autogptq \
+    ; fi && \
+    if [[ ( "${EXTRA_BACKENDS}" =~ "bark" || -z "${EXTRA_BACKENDS}" ) && "$IMAGE_TYPE" == "extras" ]]; then \
+        make -C backend/python/bark \
+    ; fi && \
+    if [[ ( "${EXTRA_BACKENDS}" =~ "rerankers" || -z "${EXTRA_BACKENDS}" ) && "$IMAGE_TYPE" == "extras" ]]; then \
+        make -C backend/python/rerankers \
+    ; fi && \
+    if [[ ( "${EXTRA_BACKENDS}" =~ "mamba" || -z "${EXTRA_BACKENDS}" ) && "$IMAGE_TYPE" == "extras" ]]; then \
+        make -C backend/python/mamba \
     ; fi
 
 # Make sure the models directory exists
@@ -343,7 +458,7 @@ RUN mkdir -p /build/models
 # Define the health check command
 HEALTHCHECK --interval=1m --timeout=10m --retries=10 \
   CMD curl -f ${HEALTHCHECK_ENDPOINT} || exit 1
-  
+
 VOLUME /build/models
 EXPOSE 8080
 ENTRYPOINT [ "/build/entrypoint.sh" ]

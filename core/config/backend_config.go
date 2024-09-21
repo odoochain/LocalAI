@@ -2,16 +2,26 @@ package config
 
 import (
 	"os"
+	"regexp"
+	"strings"
 
-	"github.com/go-skynet/LocalAI/core/schema"
-	"github.com/go-skynet/LocalAI/pkg/downloader"
-	"github.com/go-skynet/LocalAI/pkg/functions"
-	"github.com/go-skynet/LocalAI/pkg/utils"
+	"github.com/mudler/LocalAI/core/schema"
+	"github.com/mudler/LocalAI/pkg/downloader"
+	"github.com/mudler/LocalAI/pkg/functions"
 )
 
 const (
 	RAND_SEED = -1
 )
+
+type TTSConfig struct {
+
+	// Voice wav path or id
+	Voice string `yaml:"voice"`
+
+	// Vall-e-x
+	VallE VallE `yaml:"vall-e"`
+}
 
 type BackendConfig struct {
 	schema.PredictionOptions `yaml:"parameters"`
@@ -21,13 +31,15 @@ type BackendConfig struct {
 	Threads        *int              `yaml:"threads"`
 	Debug          *bool             `yaml:"debug"`
 	Roles          map[string]string `yaml:"roles"`
-	Embeddings     bool              `yaml:"embeddings"`
+	Embeddings     *bool             `yaml:"embeddings"`
 	Backend        string            `yaml:"backend"`
 	TemplateConfig TemplateConfig    `yaml:"template"`
 
-	PromptStrings, InputStrings                []string `yaml:"-"`
-	InputToken                                 [][]int  `yaml:"-"`
-	functionCallString, functionCallNameString string   `yaml:"-"`
+	PromptStrings, InputStrings                []string               `yaml:"-"`
+	InputToken                                 [][]int                `yaml:"-"`
+	functionCallString, functionCallNameString string                 `yaml:"-"`
+	ResponseFormat                             string                 `yaml:"-"`
+	ResponseFormatMap                          map[string]interface{} `yaml:"-"`
 
 	FunctionsConfig functions.FunctionsConfig `yaml:"function"`
 
@@ -45,8 +57,8 @@ type BackendConfig struct {
 	// GRPC Options
 	GRPC GRPC `yaml:"grpc"`
 
-	// Vall-e-x
-	VallE VallE `yaml:"vall-e"`
+	// TTS specifics
+	TTSConfig `yaml:"tts"`
 
 	// CUDA
 	// Explicitly enable CUDA or not (some backends might need it)
@@ -59,9 +71,9 @@ type BackendConfig struct {
 }
 
 type File struct {
-	Filename string `yaml:"filename" json:"filename"`
-	SHA256   string `yaml:"sha256" json:"sha256"`
-	URI      string `yaml:"uri" json:"uri"`
+	Filename string         `yaml:"filename" json:"filename"`
+	SHA256   string         `yaml:"sha256" json:"sha256"`
+	URI      downloader.URI `yaml:"uri" json:"uri"`
 }
 
 type VallE struct {
@@ -93,6 +105,8 @@ type Diffusers struct {
 	ControlNet       string  `yaml:"control_net"`
 }
 
+// LLMConfig is a struct that holds the configuration that are
+// generic for most of the LLM backends.
 type LLMConfig struct {
 	SystemPrompt    string   `yaml:"system_prompt"`
 	TensorSplit     string   `yaml:"tensor_split"`
@@ -112,6 +126,7 @@ type LLMConfig struct {
 	Grammar         string   `yaml:"grammar"`
 	StopWords       []string `yaml:"stopwords"`
 	Cutstrings      []string `yaml:"cutstrings"`
+	ExtractRegex    []string `yaml:"extract_regex"`
 	TrimSpace       []string `yaml:"trimspace"`
 	TrimSuffix      []string `yaml:"trimsuffix"`
 
@@ -132,6 +147,9 @@ type LLMConfig struct {
 	TensorParallelSize   int     `yaml:"tensor_parallel_size"`   // vLLM
 	MMProj               string  `yaml:"mmproj"`
 
+	FlashAttention bool `yaml:"flash_attention"`
+	NoKVOffloading bool `yaml:"no_kv_offloading"`
+
 	RopeScaling string `yaml:"rope_scaling"`
 	ModelType   string `yaml:"type"`
 
@@ -141,6 +159,7 @@ type LLMConfig struct {
 	YarnBetaSlow   float32 `yaml:"yarn_beta_slow"`
 }
 
+// AutoGPTQ is a struct that holds the configuration specific to the AutoGPTQ backend
 type AutoGPTQ struct {
 	ModelBaseName    string `yaml:"model_base_name"`
 	Device           string `yaml:"device"`
@@ -148,13 +167,31 @@ type AutoGPTQ struct {
 	UseFastTokenizer bool   `yaml:"use_fast_tokenizer"`
 }
 
+// TemplateConfig is a struct that holds the configuration of the templating system
 type TemplateConfig struct {
-	Chat                 string `yaml:"chat"`
-	ChatMessage          string `yaml:"chat_message"`
-	Completion           string `yaml:"completion"`
-	Edit                 string `yaml:"edit"`
-	Functions            string `yaml:"function"`
-	UseTokenizerTemplate bool   `yaml:"use_tokenizer_template"`
+	// Chat is the template used in the chat completion endpoint
+	Chat string `yaml:"chat"`
+
+	// ChatMessage is the template used for chat messages
+	ChatMessage string `yaml:"chat_message"`
+
+	// Completion is the template used for completion requests
+	Completion string `yaml:"completion"`
+
+	// Edit is the template used for edit completion requests
+	Edit string `yaml:"edit"`
+
+	// Functions is the template used when tools are present in the client requests
+	Functions string `yaml:"function"`
+
+	// UseTokenizerTemplate is a flag that indicates if the tokenizer template should be used.
+	// Note: this is mostly consumed for backends such as vllm and transformers
+	// that can use the tokenizers specified in the JSON config files of the models
+	UseTokenizerTemplate bool `yaml:"use_tokenizer_template"`
+
+	// JoinChatMessagesByCharacter is a string that will be used to join chat messages together.
+	// It defaults to \n
+	JoinChatMessagesByCharacter *string `yaml:"join_chat_messages_by_character"`
 }
 
 func (c *BackendConfig) SetFunctionCallString(s string) {
@@ -176,28 +213,32 @@ func (c *BackendConfig) ShouldCallSpecificFunction() bool {
 // MMProjFileName returns the filename of the MMProj file
 // If the MMProj is a URL, it will return the MD5 of the URL which is the filename
 func (c *BackendConfig) MMProjFileName() string {
-	modelURL := downloader.ConvertURL(c.MMProj)
-	if downloader.LooksLikeURL(modelURL) {
-		return utils.MD5(modelURL)
+	uri := downloader.URI(c.MMProj)
+	if uri.LooksLikeURL() {
+		f, _ := uri.FilenameFromUrl()
+		return f
 	}
 
 	return c.MMProj
 }
 
 func (c *BackendConfig) IsMMProjURL() bool {
-	return downloader.LooksLikeURL(downloader.ConvertURL(c.MMProj))
+	uri := downloader.URI(c.MMProj)
+	return uri.LooksLikeURL()
 }
 
 func (c *BackendConfig) IsModelURL() bool {
-	return downloader.LooksLikeURL(downloader.ConvertURL(c.Model))
+	uri := downloader.URI(c.Model)
+	return uri.LooksLikeURL()
 }
 
 // ModelFileName returns the filename of the model
 // If the model is a URL, it will return the MD5 of the URL which is the filename
 func (c *BackendConfig) ModelFileName() string {
-	modelURL := downloader.ConvertURL(c.Model)
-	if downloader.LooksLikeURL(modelURL) {
-		return utils.MD5(modelURL)
+	uri := downloader.URI(c.Model)
+	if uri.LooksLikeURL() {
+		f, _ := uri.FilenameFromUrl()
+		return f
 	}
 
 	return c.Model
@@ -301,6 +342,10 @@ func (cfg *BackendConfig) SetDefaults(opts ...ConfigLoaderOption) {
 		cfg.LowVRAM = &falseV
 	}
 
+	if cfg.Embeddings == nil {
+		cfg.Embeddings = &falseV
+	}
+
 	// Value passed by the top level are treated as default (no implicit defaults)
 	// defaults are set by the user
 	if ctx == 0 {
@@ -331,4 +376,37 @@ func (cfg *BackendConfig) SetDefaults(opts ...ConfigLoaderOption) {
 	if debug {
 		cfg.Debug = &trueV
 	}
+
+	guessDefaultsFromFile(cfg, lo.modelPath)
+}
+
+func (c *BackendConfig) Validate() bool {
+	downloadedFileNames := []string{}
+	for _, f := range c.DownloadFiles {
+		downloadedFileNames = append(downloadedFileNames, f.Filename)
+	}
+	validationTargets := []string{c.Backend, c.Model, c.MMProj}
+	validationTargets = append(validationTargets, downloadedFileNames...)
+	// Simple validation to make sure the model can be correctly loaded
+	for _, n := range validationTargets {
+		if n == "" {
+			continue
+		}
+		if strings.HasPrefix(n, string(os.PathSeparator)) ||
+			strings.Contains(n, "..") {
+			return false
+		}
+	}
+
+	if c.Backend != "" {
+		// a regex that checks that is a string name with no special characters, except '-' and '_'
+		re := regexp.MustCompile(`^[a-zA-Z0-9-_]+$`)
+		return re.MatchString(c.Backend)
+	}
+
+	return true
+}
+
+func (c *BackendConfig) HasTemplate() bool {
+	return c.TemplateConfig.Completion != "" || c.TemplateConfig.Edit != "" || c.TemplateConfig.Chat != "" || c.TemplateConfig.ChatMessage != ""
 }

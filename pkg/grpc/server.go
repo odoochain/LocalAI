@@ -6,7 +6,7 @@ import (
 	"log"
 	"net"
 
-	pb "github.com/go-skynet/LocalAI/pkg/grpc/proto"
+	pb "github.com/mudler/LocalAI/pkg/grpc/proto"
 	"google.golang.org/grpc"
 )
 
@@ -84,7 +84,19 @@ func (s *server) TTS(ctx context.Context, in *pb.TTSRequest) (*pb.Result, error)
 	if err != nil {
 		return &pb.Result{Message: fmt.Sprintf("Error generating audio: %s", err.Error()), Success: false}, err
 	}
-	return &pb.Result{Message: "Audio generated", Success: true}, nil
+	return &pb.Result{Message: "TTS audio generated", Success: true}, nil
+}
+
+func (s *server) SoundGeneration(ctx context.Context, in *pb.SoundGenerationRequest) (*pb.Result, error) {
+	if s.llm.Locking() {
+		s.llm.Lock()
+		defer s.llm.Unlock()
+	}
+	err := s.llm.SoundGeneration(in)
+	if err != nil {
+		return &pb.Result{Message: fmt.Sprintf("Error generating audio: %s", err.Error()), Success: false}, err
+	}
+	return &pb.Result{Message: "Sound Generation audio generated", Success: true}, nil
 }
 
 func (s *server) AudioTranscription(ctx context.Context, in *pb.TranscriptRequest) (*pb.TranscriptResult, error) {

@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/go-skynet/LocalAI/core/backend"
-	"github.com/go-skynet/LocalAI/core/config"
-	"github.com/go-skynet/LocalAI/pkg/model"
+	"github.com/mudler/LocalAI/core/backend"
+	"github.com/mudler/LocalAI/core/config"
+	"github.com/mudler/LocalAI/pkg/model"
 
-	"github.com/go-skynet/LocalAI/core/schema"
 	"github.com/google/uuid"
+	"github.com/mudler/LocalAI/core/schema"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/rs/zerolog/log"
@@ -23,7 +23,7 @@ import (
 // @Router /v1/embeddings [post]
 func EmbeddingsEndpoint(cl *config.BackendConfigLoader, ml *model.ModelLoader, appConfig *config.ApplicationConfig) func(c *fiber.Ctx) error {
 	return func(c *fiber.Ctx) error {
-		model, input, err := readRequest(c, ml, appConfig, true)
+		model, input, err := readRequest(c, cl, ml, appConfig, true)
 		if err != nil {
 			return fmt.Errorf("failed reading parameters from request:%w", err)
 		}

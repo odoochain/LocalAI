@@ -5,20 +5,25 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/go-skynet/LocalAI/core/backend"
-	"github.com/go-skynet/LocalAI/core/config"
+	"github.com/mudler/LocalAI/core/backend"
+	"github.com/mudler/LocalAI/core/config"
 
-	"github.com/go-skynet/LocalAI/core/schema"
-	model "github.com/go-skynet/LocalAI/pkg/model"
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
+	"github.com/mudler/LocalAI/core/schema"
+	model "github.com/mudler/LocalAI/pkg/model"
 
 	"github.com/rs/zerolog/log"
 )
 
+// EditEndpoint is the OpenAI edit API endpoint
+// @Summary OpenAI edit endpoint
+// @Param request body schema.OpenAIRequest true "query params"
+// @Success 200 {object} schema.OpenAIResponse "Response"
+// @Router /v1/edits [post]
 func EditEndpoint(cl *config.BackendConfigLoader, ml *model.ModelLoader, appConfig *config.ApplicationConfig) func(c *fiber.Ctx) error {
 	return func(c *fiber.Ctx) error {
-		modelFile, input, err := readRequest(c, ml, appConfig, true)
+		modelFile, input, err := readRequest(c, cl, ml, appConfig, true)
 		if err != nil {
 			return fmt.Errorf("failed reading parameters from request:%w", err)
 		}

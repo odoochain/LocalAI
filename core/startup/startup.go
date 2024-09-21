@@ -4,14 +4,15 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/go-skynet/LocalAI/core"
-	"github.com/go-skynet/LocalAI/core/config"
-	"github.com/go-skynet/LocalAI/core/services"
-	"github.com/go-skynet/LocalAI/internal"
-	"github.com/go-skynet/LocalAI/pkg/assets"
-	"github.com/go-skynet/LocalAI/pkg/model"
-	pkgStartup "github.com/go-skynet/LocalAI/pkg/startup"
-	"github.com/go-skynet/LocalAI/pkg/xsysinfo"
+	"github.com/mudler/LocalAI/core"
+	"github.com/mudler/LocalAI/core/config"
+	"github.com/mudler/LocalAI/core/services"
+	"github.com/mudler/LocalAI/internal"
+	"github.com/mudler/LocalAI/pkg/assets"
+	"github.com/mudler/LocalAI/pkg/library"
+	"github.com/mudler/LocalAI/pkg/model"
+	pkgStartup "github.com/mudler/LocalAI/pkg/startup"
+	"github.com/mudler/LocalAI/pkg/xsysinfo"
 	"github.com/rs/zerolog/log"
 )
 
@@ -59,10 +60,11 @@ func Startup(opts ...config.AppOption) (*config.BackendConfigLoader, *model.Mode
 		}
 	}
 
-	//
-	pkgStartup.PreloadModelsConfigurations(options.ModelLibraryURL, options.ModelPath, options.ModelsURL...)
+	if err := pkgStartup.InstallModels(options.Galleries, options.ModelLibraryURL, options.ModelPath, options.EnforcePredownloadScans, nil, options.ModelsURL...); err != nil {
+		log.Error().Err(err).Msg("error installing models")
+	}
 
-	cl := config.NewBackendConfigLoader()
+	cl := config.NewBackendConfigLoader(options.ModelPath)
 	ml := model.NewModelLoader(options.ModelPath)
 
 	configLoaderOpts := options.ToConfigLoaderOptions()
@@ -72,7 +74,7 @@ func Startup(opts ...config.AppOption) (*config.BackendConfigLoader, *model.Mode
 	}
 
 	if options.ConfigFile != "" {
-		if err := cl.LoadBackendConfigFile(options.ConfigFile, configLoaderOpts...); err != nil {
+		if err := cl.LoadMultipleBackendConfigsSingleFile(options.ConfigFile, configLoaderOpts...); err != nil {
 			log.Error().Err(err).Msg("error loading config file")
 		}
 	}
@@ -82,21 +84,20 @@ func Startup(opts ...config.AppOption) (*config.BackendConfigLoader, *model.Mode
 	}
 
 	if options.PreloadJSONModels != "" {
-		if err := services.ApplyGalleryFromString(options.ModelPath, options.PreloadJSONModels, cl, options.Galleries); err != nil {
+		if err := services.ApplyGalleryFromString(options.ModelPath, options.PreloadJSONModels, options.EnforcePredownloadScans, options.Galleries); err != nil {
 			return nil, nil, nil, err
 		}
 	}
 
 	if options.PreloadModelsFromPath != "" {
-		if err := services.ApplyGalleryFromFile(options.ModelPath, options.PreloadModelsFromPath, cl, options.Galleries); err != nil {
+		if err := services.ApplyGalleryFromFile(options.ModelPath, options.PreloadModelsFromPath, options.EnforcePredownloadScans, options.Galleries); err != nil {
 			return nil, nil, nil, err
 		}
 	}
 
 	if options.Debug {
-		for _, v := range cl.ListBackendConfigs() {
-			cfg, _ := cl.GetBackendConfig(v)
-			log.Debug().Msgf("Model: %s (config: %+v)", v, cfg)
+		for _, v := range cl.GetAllBackendConfigs() {
+			log.Debug().Msgf("Model: %s (config: %+v)", v.Name, v)
 		}
 	}
 
@@ -105,7 +106,15 @@ func Startup(opts ...config.AppOption) (*config.BackendConfigLoader, *model.Mode
 		err := assets.ExtractFiles(options.BackendAssets, options.AssetsDestination)
 		log.Debug().Msgf("Extracting backend assets files to %s", options.AssetsDestination)
 		if err != nil {
-			log.Warn().Msgf("Failed extracting backend assets files: %s (might be required for some backends to work properly, like gpt4all)", err)
+			log.Warn().Msgf("Failed extracting backend assets files: %s (might be required for some backends to work properly)", err)
+		}
+	}
+
+	if options.LibPath != "" {
+		// If there is a lib directory, set LD_LIBRARY_PATH to include it
+		err := library.LoadExternal(options.LibPath)
+		if err != nil {
+			log.Error().Err(err).Str("LibPath", options.LibPath).Msg("Error while loading external libraries")
 		}
 	}
 
@@ -136,15 +145,35 @@ func Startup(opts ...config.AppOption) (*config.BackendConfigLoader, *model.Mode
 	}
 
 	// Watch the configuration directory
-	// If the directory does not exist, we don't watch it
-	configHandler := newConfigFileHandler(options)
-	err = configHandler.Watch()
-	if err != nil {
-		log.Error().Err(err).Msg("error establishing configuration directory watcher")
-	}
+	startWatcher(options)
 
 	log.Info().Msg("core/startup process completed!")
 	return cl, ml, options, nil
+}
+
+func startWatcher(options *config.ApplicationConfig) {
+	if options.DynamicConfigsDir == "" {
+		// No need to start the watcher if the directory is not set
+		return
+	}
+
+	if _, err := os.Stat(options.DynamicConfigsDir); err != nil {
+		if os.IsNotExist(err) {
+			// We try to create the directory if it does not exist and was specified
+			if err := os.MkdirAll(options.DynamicConfigsDir, 0700); err != nil {
+				log.Error().Err(err).Msg("failed creating DynamicConfigsDir")
+			}
+		} else {
+			// something else happened, we log the error and don't start the watcher
+			log.Error().Err(err).Msg("failed to read DynamicConfigsDir, watcher will not be started")
+			return
+		}
+	}
+
+	configHandler := newConfigFileHandler(options)
+	if err := configHandler.Watch(); err != nil {
+		log.Error().Err(err).Msg("failed creating watcher")
+	}
 }
 
 // In Lieu of a proper DI framework, this function wires up the Application manually.
@@ -152,7 +181,7 @@ func Startup(opts ...config.AppOption) (*config.BackendConfigLoader, *model.Mode
 func createApplication(appConfig *config.ApplicationConfig) *core.Application {
 	app := &core.Application{
 		ApplicationConfig:   appConfig,
-		BackendConfigLoader: config.NewBackendConfigLoader(),
+		BackendConfigLoader: config.NewBackendConfigLoader(appConfig.ModelPath),
 		ModelLoader:         model.NewModelLoader(appConfig.ModelPath),
 	}
 
@@ -165,8 +194,7 @@ func createApplication(appConfig *config.ApplicationConfig) *core.Application {
 	// app.TextToSpeechBackendService = backend.NewTextToSpeechBackendService(app.ModelLoader, app.BackendConfigLoader, app.ApplicationConfig)
 
 	app.BackendMonitorService = services.NewBackendMonitorService(app.ModelLoader, app.BackendConfigLoader, app.ApplicationConfig)
-	app.GalleryService = services.NewGalleryService(app.ApplicationConfig.ModelPath)
-	app.ListModelsService = services.NewListModelsService(app.ModelLoader, app.BackendConfigLoader, app.ApplicationConfig)
+	app.GalleryService = services.NewGalleryService(app.ApplicationConfig)
 	// app.OpenAIService = services.NewOpenAIService(app.ModelLoader, app.BackendConfigLoader, app.ApplicationConfig, app.LLMBackendService)
 
 	app.LocalAIMetricsService, err = services.NewLocalAIMetricsService()

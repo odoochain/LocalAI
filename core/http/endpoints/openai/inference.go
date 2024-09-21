@@ -1,11 +1,11 @@
 package openai
 
 import (
-	"github.com/go-skynet/LocalAI/core/backend"
-	"github.com/go-skynet/LocalAI/core/config"
+	"github.com/mudler/LocalAI/core/backend"
+	"github.com/mudler/LocalAI/core/config"
 
-	"github.com/go-skynet/LocalAI/core/schema"
-	model "github.com/go-skynet/LocalAI/pkg/model"
+	"github.com/mudler/LocalAI/core/schema"
+	model "github.com/mudler/LocalAI/pkg/model"
 )
 
 func ComputeChoices(
@@ -27,9 +27,17 @@ func ComputeChoices(
 	for _, m := range req.Messages {
 		images = append(images, m.StringImages...)
 	}
+	videos := []string{}
+	for _, m := range req.Messages {
+		videos = append(videos, m.StringVideos...)
+	}
+	audios := []string{}
+	for _, m := range req.Messages {
+		audios = append(audios, m.StringAudios...)
+	}
 
 	// get the model function to call for the result
-	predFunc, err := backend.ModelInference(req.Context, predInput, req.Messages, images, loader, *config, o, tokenCallback)
+	predFunc, err := backend.ModelInference(req.Context, predInput, req.Messages, images, videos, audios, loader, *config, o, tokenCallback)
 	if err != nil {
 		return result, backend.TokenUsage{}, err
 	}

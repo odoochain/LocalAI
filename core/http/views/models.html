@@ -10,7 +10,7 @@
 
         <div class="models mt-12">
             <h2 class="text-center text-3xl font-semibold text-gray-100">
-                🖼️ Available models from <i>{{ len .Repositories }}</i> repositories     <a href="https://localai.io/models/" target="_blank" >
+                🖼️ Available {{.AvailableModels}} models from <i>{{ len .Repositories }}</i> repositories     <a href="https://localai.io/models/" target="_blank" >
                     <i class="fas fa-circle-info pr-2"></i>
                 </a></h2> 
 
@@ -63,8 +63,11 @@
                 {{ end }}
             </div>
 
+            
             <span class="htmx-indicator loader"></span>
-            <input class="form-control appearance-none block w-full px-3 py-2 text-base font-normal text-gray-300 pb-2 mb-5 bg-gray-800 bg-clip-padding border border-solid border-gray-600 rounded transition ease-in-out m-0 focus:text-gray-300 focus:bg-gray-900 focus:border-blue-500 focus:outline-none" type="search" 
+            {{template "views/partials/inprogress" .}}
+
+            <input class="form-control appearance-none block w-full mt-5 px-3 py-2 text-base font-normal text-gray-300 pb-2 mb-5 bg-gray-800 bg-clip-padding border border-solid border-gray-600 rounded transition ease-in-out m-0 focus:text-gray-300 focus:bg-gray-900 focus:border-blue-500 focus:outline-none" type="search" 
                 name="search" placeholder="Begin Typing To Search models..." 
                 hx-post="/browse/search/models" 
                 hx-trigger="input changed delay:500ms, search" 

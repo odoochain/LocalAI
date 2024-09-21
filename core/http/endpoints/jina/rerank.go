@@ -1,17 +1,22 @@
 package jina
 
 import (
-	"github.com/go-skynet/LocalAI/core/backend"
-	"github.com/go-skynet/LocalAI/core/config"
+	"github.com/mudler/LocalAI/core/backend"
+	"github.com/mudler/LocalAI/core/config"
 
-	fiberContext "github.com/go-skynet/LocalAI/core/http/ctx"
-	"github.com/go-skynet/LocalAI/core/schema"
-	"github.com/go-skynet/LocalAI/pkg/grpc/proto"
-	"github.com/go-skynet/LocalAI/pkg/model"
 	"github.com/gofiber/fiber/v2"
+	fiberContext "github.com/mudler/LocalAI/core/http/ctx"
+	"github.com/mudler/LocalAI/core/schema"
+	"github.com/mudler/LocalAI/pkg/grpc/proto"
+	"github.com/mudler/LocalAI/pkg/model"
 	"github.com/rs/zerolog/log"
 )
 
+// JINARerankEndpoint acts like the Jina reranker endpoint (https://jina.ai/reranker/)
+// @Summary Reranks a list of phrases by relevance to a given text query.
+// @Param request body schema.JINARerankRequest true "query params"
+// @Success 200 {object} schema.JINARerankResponse "Response"
+// @Router /v1/rerank [post]
 func JINARerankEndpoint(cl *config.BackendConfigLoader, ml *model.ModelLoader, appConfig *config.ApplicationConfig) func(c *fiber.Ctx) error {
 	return func(c *fiber.Ctx) error {
 		req := new(schema.JINARerankRequest)
@@ -28,7 +33,7 @@ func JINARerankEndpoint(cl *config.BackendConfigLoader, ml *model.ModelLoader, a
 			return err
 		}
 
-		modelFile, err := fiberContext.ModelFromContext(c, ml, input.Model, false)
+		modelFile, err := fiberContext.ModelFromContext(c, cl, ml, input.Model, false)
 		if err != nil {
 			modelFile = input.Model
 			log.Warn().Msgf("Model not found in context: %s", input.Model)

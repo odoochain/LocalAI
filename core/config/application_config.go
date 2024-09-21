@@ -4,9 +4,10 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
+	"regexp"
 	"time"
 
-	"github.com/go-skynet/LocalAI/pkg/gallery"
+	"github.com/mudler/LocalAI/pkg/xsysinfo"
 	"github.com/rs/zerolog/log"
 )
 
@@ -14,8 +15,8 @@ type ApplicationConfig struct {
 	Context                             context.Context
 	ConfigFile                          string
 	ModelPath                           string
+	LibPath                             string
 	UploadLimitMB, Threads, ContextSize int
-	DisableWebUI                        bool
 	F16                                 bool
 	Debug                               bool
 	ImageDir                            string
@@ -25,14 +26,25 @@ type ApplicationConfig struct {
 	DynamicConfigsDir                   string
 	DynamicConfigsDirPollInterval       time.Duration
 	CORS                                bool
+	CSRF                                bool
 	PreloadJSONModels                   string
 	PreloadModelsFromPath               string
 	CORSAllowOrigins                    string
 	ApiKeys                             []string
+	P2PToken                            string
+	P2PNetworkID                        string
+
+	DisableWebUI                       bool
+	EnforcePredownloadScans            bool
+	OpaqueErrors                       bool
+	UseSubtleKeyComparison             bool
+	DisableApiKeyRequirementForHttpGet bool
+	HttpGetExemptedEndpoints           []*regexp.Regexp
+	DisableGalleryEndpoint             bool
 
 	ModelLibraryURL string
 
-	Galleries []gallery.Gallery
+	Galleries []Gallery
 
 	BackendAssets     embed.FS
 	AssetsDestination string
@@ -59,7 +71,6 @@ func NewApplicationConfig(o ...AppOption) *ApplicationConfig {
 	opt := &ApplicationConfig{
 		Context:       context.Background(),
 		UploadLimitMB: 15,
-		Threads:       1,
 		ContextSize:   512,
 		Debug:         true,
 	}
@@ -87,9 +98,33 @@ func WithCors(b bool) AppOption {
 	}
 }
 
+func WithP2PNetworkID(s string) AppOption {
+	return func(o *ApplicationConfig) {
+		o.P2PNetworkID = s
+	}
+}
+
+func WithCsrf(b bool) AppOption {
+	return func(o *ApplicationConfig) {
+		o.CSRF = b
+	}
+}
+
+func WithP2PToken(s string) AppOption {
+	return func(o *ApplicationConfig) {
+		o.P2PToken = s
+	}
+}
+
 func WithModelLibraryURL(url string) AppOption {
 	return func(o *ApplicationConfig) {
 		o.ModelLibraryURL = url
+	}
+}
+
+func WithLibPath(path string) AppOption {
+	return func(o *ApplicationConfig) {
+		o.LibPath = path
 	}
 }
 
@@ -100,6 +135,10 @@ var EnableWatchDog = func(o *ApplicationConfig) {
 var EnableWatchDogIdleCheck = func(o *ApplicationConfig) {
 	o.WatchDog = true
 	o.WatchDogIdle = true
+}
+
+var DisableGalleryEndpoint = func(o *ApplicationConfig) {
+	o.DisableGalleryEndpoint = true
 }
 
 var EnableWatchDogBusyCheck = func(o *ApplicationConfig) {
@@ -165,10 +204,10 @@ func WithBackendAssets(f embed.FS) AppOption {
 func WithStringGalleries(galls string) AppOption {
 	return func(o *ApplicationConfig) {
 		if galls == "" {
-			o.Galleries = []gallery.Gallery{}
+			o.Galleries = []Gallery{}
 			return
 		}
-		var galleries []gallery.Gallery
+		var galleries []Gallery
 		if err := json.Unmarshal([]byte(galls), &galleries); err != nil {
 			log.Error().Err(err).Msg("failed loading galleries")
 		}
@@ -176,7 +215,7 @@ func WithStringGalleries(galls string) AppOption {
 	}
 }
 
-func WithGalleries(galleries []gallery.Gallery) AppOption {
+func WithGalleries(galleries []Gallery) AppOption {
 	return func(o *ApplicationConfig) {
 		o.Galleries = append(o.Galleries, galleries...)
 	}
@@ -213,6 +252,9 @@ func WithUploadLimitMB(limit int) AppOption {
 
 func WithThreads(threads int) AppOption {
 	return func(o *ApplicationConfig) {
+		if threads == 0 { // 0 is not allowed
+			threads = xsysinfo.CPUPhysicalCores()
+		}
 		o.Threads = threads
 	}
 }
@@ -277,6 +319,44 @@ func WithApiKeys(apiKeys []string) AppOption {
 	}
 }
 
+func WithEnforcedPredownloadScans(enforced bool) AppOption {
+	return func(o *ApplicationConfig) {
+		o.EnforcePredownloadScans = enforced
+	}
+}
+
+func WithOpaqueErrors(opaque bool) AppOption {
+	return func(o *ApplicationConfig) {
+		o.OpaqueErrors = opaque
+	}
+}
+
+func WithSubtleKeyComparison(subtle bool) AppOption {
+	return func(o *ApplicationConfig) {
+		o.UseSubtleKeyComparison = subtle
+	}
+}
+
+func WithDisableApiKeyRequirementForHttpGet(required bool) AppOption {
+	return func(o *ApplicationConfig) {
+		o.DisableApiKeyRequirementForHttpGet = required
+	}
+}
+
+func WithHttpGetExemptedEndpoints(endpoints []string) AppOption {
+	return func(o *ApplicationConfig) {
+		o.HttpGetExemptedEndpoints = []*regexp.Regexp{}
+		for _, epr := range endpoints {
+			r, err := regexp.Compile(epr)
+			if err == nil && r != nil {
+				o.HttpGetExemptedEndpoints = append(o.HttpGetExemptedEndpoints, r)
+			} else {
+				log.Warn().Err(err).Str("regex", epr).Msg("Error while compiling HTTP Get Exemption regex, skipping this entry.")
+			}
+		}
+	}
+}
+
 // ToConfigLoaderOptions returns a slice of ConfigLoader Option.
 // Some options defined at the application level are going to be passed as defaults for
 // all the configuration for the models.
@@ -289,6 +369,7 @@ func (o *ApplicationConfig) ToConfigLoaderOptions() []ConfigLoaderOption {
 		LoadOptionDebug(o.Debug),
 		LoadOptionF16(o.F16),
 		LoadOptionThreads(o.Threads),
+		ModelPath(o.ModelPath),
 	}
 }
 

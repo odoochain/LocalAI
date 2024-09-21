@@ -10,7 +10,7 @@ on:
       - '*'
 
 env:
-  GRPC_VERSION: v1.63.0
+  GRPC_VERSION: v1.65.0
 
 concurrency:
   group: ci-tests-${{ github.head_ref || github.ref }}-${{ github.repository }}
@@ -57,7 +57,7 @@ jobs:
           df -h
       - name: Clone
         uses: actions/checkout@v4
-        with: 
+        with:
           submodules: true
       - name: Setup Go ${{ matrix.go-version }}
         uses: actions/setup-go@v5
@@ -70,7 +70,8 @@ jobs:
       - name: Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install build-essential curl ffmpeg
+          sudo apt-get install build-essential ccache upx-ucl curl ffmpeg
+          sudo apt-get install -y libgmock-dev
           curl https://repo.anaconda.com/pkgs/misc/gpgkeys/anaconda.asc | gpg --dearmor > conda.gpg && \
              sudo install -o root -g root -m 644 conda.gpg /usr/share/keyrings/conda-archive-keyring.gpg && \
              gpg --keyring /usr/share/keyrings/conda-archive-keyring.gpg --no-default-keyring --fingerprint 34161F5BF5EB1D4BFBBB8F0A8AEB4F8B29D82806 && \
@@ -78,6 +79,8 @@ jobs:
              sudo /bin/bash -c 'echo "deb [arch=amd64 signed-by=/usr/share/keyrings/conda-archive-keyring.gpg] https://repo.anaconda.com/pkgs/misc/debrepo/conda stable main" | tee -a /etc/apt/sources.list.d/conda.list' && \
              sudo apt-get update && \
              sudo apt-get install -y conda
+          # Install UV
+          curl -LsSf https://astral.sh/uv/install.sh | sh
           sudo apt-get install -y ca-certificates cmake patch python3-pip unzip
           sudo apt-get install -y libopencv-dev
 
@@ -85,8 +88,14 @@ jobs:
           unzip -j -d /usr/local/bin protoc.zip bin/protoc && \
           rm protoc.zip
 
-          go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
-          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+          curl -O https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb
+          sudo dpkg -i cuda-keyring_1.1-1_all.deb
+          sudo apt-get update
+          sudo apt-get install -y cuda-nvcc-${CUDA_VERSION} libcublas-dev-${CUDA_VERSION}
+          export CUDACXX=/usr/local/cuda/bin/nvcc
+
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.34.2
+          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@1958fcbe2ca8bd93af633f11e97d44e567e945af
 
           # The python3-grpc-tools package in 22.04 is too old
           pip install --user grpcio-tools
@@ -100,6 +109,8 @@ jobs:
           sudo cp -rfv sources/go-piper/piper-phonemize/pi/lib/. /usr/lib/ && \
           # Pre-build stable diffusion before we install a newer version of abseil (not compatible with stablediffusion-ncn)
           PATH="$PATH:/root/go/bin" GO_TAGS="stablediffusion tts" GRPC_BACKENDS=backend-assets/grpc/stablediffusion make build
+        env:
+          CUDA_VERSION: 12-4
       - name: Cache grpc
         id: cache-grpc
         uses: actions/cache@v4
@@ -110,7 +121,8 @@ jobs:
         if: steps.cache-grpc.outputs.cache-hit != 'true'
         run: |
           git clone --recurse-submodules -b ${{ env.GRPC_VERSION }} --depth 1 --jobs 5 --shallow-submodules https://github.com/grpc/grpc && \
-          cd grpc && mkdir -p cmake/build && cd cmake/build && cmake -DgRPC_INSTALL=ON \
+          cd grpc && sed -i "216i\  TESTONLY" "third_party/abseil-cpp/absl/container/CMakeLists.txt" && mkdir -p cmake/build && cd cmake/build && \
+          cmake -DgRPC_INSTALL=ON \
             -DgRPC_BUILD_TESTS=OFF \
             ../.. && sudo make --jobs 5
       - name: Install gRPC
@@ -164,11 +176,11 @@ jobs:
           df -h
       - name: Clone
         uses: actions/checkout@v4
-        with: 
+        with:
           submodules: true
       - name: Build images
         run: |
-          docker build --build-arg FFMPEG=true --build-arg IMAGE_TYPE=core --build-arg MAKEFLAGS="--jobs=5 --output-sync=target" -t local-ai:tests -f Dockerfile .
+          docker build --build-arg FFMPEG=true --build-arg IMAGE_TYPE=extras --build-arg EXTRA_BACKENDS=rerankers --build-arg MAKEFLAGS="--jobs=5 --output-sync=target" -t local-ai:tests -f Dockerfile .
           BASE_IMAGE=local-ai:tests DOCKER_AIO_IMAGE=local-ai-aio:test make docker-aio
       - name: Test
         run: |
@@ -190,7 +202,7 @@ jobs:
     steps:
       - name: Clone
         uses: actions/checkout@v4
-        with: 
+        with:
           submodules: true
       - name: Setup Go ${{ matrix.go-version }}
         uses: actions/setup-go@v5
@@ -202,15 +214,16 @@ jobs:
         run: go version
       - name: Dependencies
         run: |
-          brew install protobuf grpc make protoc-gen-go protoc-gen-go-grpc
-          pip install --user grpcio-tools==1.63.0
+          brew install protobuf grpc make protoc-gen-go protoc-gen-go-grpc libomp llvm
+          pip install --user --no-cache-dir grpcio-tools==1.64.1
       - name: Test
         run: |
           export C_INCLUDE_PATH=/usr/local/include
           export CPLUS_INCLUDE_PATH=/usr/local/include
+          export CC=/opt/homebrew/opt/llvm/bin/clang
           # Used to run the newer GNUMake version from brew that supports --output-sync
           export PATH="/opt/homebrew/opt/make/libexec/gnubin:$PATH"
-          BUILD_TYPE="GITHUB_CI_HAS_BROKEN_METAL" CMAKE_ARGS="-DLLAMA_F16C=OFF -DLLAMA_AVX512=OFF -DLLAMA_AVX2=OFF -DLLAMA_FMA=OFF" make --jobs 4 --output-sync=target test
+          BUILD_TYPE="GITHUB_CI_HAS_BROKEN_METAL" CMAKE_ARGS="-DGGML_F16C=OFF -DGGML_AVX512=OFF -DGGML_AVX2=OFF -DGGML_FMA=OFF" make --jobs 4 --output-sync=target test
       - name: Setup tmate session if tests fail
         if: ${{ failure() }}
         uses: mxschmitt/action-tmate@v3.18

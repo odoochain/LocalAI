@@ -3,23 +3,26 @@ package http
 import (
 	"embed"
 	"errors"
+	"fmt"
 	"net/http"
-	"strings"
 
-	"github.com/go-skynet/LocalAI/pkg/utils"
+	"github.com/dave-gray101/v2keyauth"
+	"github.com/mudler/LocalAI/pkg/utils"
 
-	"github.com/go-skynet/LocalAI/core/http/endpoints/localai"
-	"github.com/go-skynet/LocalAI/core/http/endpoints/openai"
-	"github.com/go-skynet/LocalAI/core/http/routes"
+	"github.com/mudler/LocalAI/core/http/endpoints/localai"
+	"github.com/mudler/LocalAI/core/http/endpoints/openai"
+	"github.com/mudler/LocalAI/core/http/middleware"
+	"github.com/mudler/LocalAI/core/http/routes"
 
-	"github.com/go-skynet/LocalAI/core/config"
-	"github.com/go-skynet/LocalAI/core/schema"
-	"github.com/go-skynet/LocalAI/core/services"
-	"github.com/go-skynet/LocalAI/pkg/model"
+	"github.com/mudler/LocalAI/core/config"
+	"github.com/mudler/LocalAI/core/schema"
+	"github.com/mudler/LocalAI/core/services"
+	"github.com/mudler/LocalAI/pkg/model"
 
 	"github.com/gofiber/contrib/fiberzerolog"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
+	"github.com/gofiber/fiber/v2/middleware/csrf"
 	"github.com/gofiber/fiber/v2/middleware/favicon"
 	"github.com/gofiber/fiber/v2/middleware/filesystem"
 	"github.com/gofiber/fiber/v2/middleware/recover"
@@ -65,15 +68,19 @@ var embedDirStatic embed.FS
 // @name Authorization
 
 func App(cl *config.BackendConfigLoader, ml *model.ModelLoader, appConfig *config.ApplicationConfig) (*fiber.App, error) {
-	// Return errors as JSON responses
-	app := fiber.New(fiber.Config{
+
+	fiberCfg := fiber.Config{
 		Views:     renderEngine(),
 		BodyLimit: appConfig.UploadLimitMB * 1024 * 1024, // this is the default limit of 4MB
 		// We disable the Fiber startup message as it does not conform to structured logging.
 		// We register a startup log line with connection information in the OnListen hook to keep things user friendly though
 		DisableStartupMessage: true,
 		// Override default error handler
-		ErrorHandler: func(ctx *fiber.Ctx, err error) error {
+	}
+
+	if !appConfig.OpaqueErrors {
+		// Normally, return errors as JSON responses
+		fiberCfg.ErrorHandler = func(ctx *fiber.Ctx, err error) error {
 			// Status code defaults to 500
 			code := fiber.StatusInternalServerError
 
@@ -89,8 +96,15 @@ func App(cl *config.BackendConfigLoader, ml *model.ModelLoader, appConfig *confi
 					Error: &schema.APIError{Message: err.Error(), Code: code},
 				},
 			)
-		},
-	})
+		}
+	} else {
+		// If OpaqueErrors are required, replace everything with a blank 500.
+		fiberCfg.ErrorHandler = func(ctx *fiber.Ctx, _ error) error {
+			return ctx.Status(500).SendString("")
+		}
+	}
+
+	app := fiber.New(fiberCfg)
 
 	app.Hooks().OnListen(func(listenData fiber.ListenData) error {
 		scheme := "http"
@@ -125,36 +139,13 @@ func App(cl *config.BackendConfigLoader, ml *model.ModelLoader, appConfig *confi
 		})
 	}
 
-	// Auth middleware checking if API key is valid. If no API key is set, no auth is required.
-	auth := func(c *fiber.Ctx) error {
-		if len(appConfig.ApiKeys) == 0 {
-			return c.Next()
-		}
-
-		if len(appConfig.ApiKeys) == 0 {
-			return c.Next()
-		}
-
-		authHeader := readAuthHeader(c)
-		if authHeader == "" {
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"message": "Authorization header missing"})
-		}
-
-		// If it's a bearer token
-		authHeaderParts := strings.Split(authHeader, " ")
-		if len(authHeaderParts) != 2 || authHeaderParts[0] != "Bearer" {
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"message": "Invalid Authorization header format"})
-		}
-
-		apiKey := authHeaderParts[1]
-		for _, key := range appConfig.ApiKeys {
-			if apiKey == key {
-				return c.Next()
-			}
-		}
-
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"message": "Invalid API key"})
+	kaConfig, err := middleware.GetKeyAuthConfig(appConfig)
+	if err != nil || kaConfig == nil {
+		return nil, fmt.Errorf("failed to create key auth config: %w", err)
 	}
+
+	// Auth is applied to _all_ endpoints. No exceptions. Filtering out endpoints to bypass is the role of the Filter property of the KeyAuth Configuration
+	app.Use(v2keyauth.New(*kaConfig))
 
 	if appConfig.CORS {
 		var c func(ctx *fiber.Ctx) error
@@ -167,21 +158,26 @@ func App(cl *config.BackendConfigLoader, ml *model.ModelLoader, appConfig *confi
 		app.Use(c)
 	}
 
+	if appConfig.CSRF {
+		log.Debug().Msg("Enabling CSRF middleware. Tokens are now required for state-modifying requests")
+		app.Use(csrf.New())
+	}
+
 	// Load config jsons
 	utils.LoadConfig(appConfig.UploadDir, openai.UploadedFilesFile, &openai.UploadedFiles)
 	utils.LoadConfig(appConfig.ConfigsDir, openai.AssistantsConfigFile, &openai.Assistants)
 	utils.LoadConfig(appConfig.ConfigsDir, openai.AssistantsFileConfigFile, &openai.AssistantFiles)
 
-	galleryService := services.NewGalleryService(appConfig.ModelPath)
+	galleryService := services.NewGalleryService(appConfig)
 	galleryService.Start(appConfig.Context, cl)
 
-	routes.RegisterElevenLabsRoutes(app, cl, ml, appConfig, auth)
-	routes.RegisterLocalAIRoutes(app, cl, ml, appConfig, galleryService, auth)
-	routes.RegisterOpenAIRoutes(app, cl, ml, appConfig, auth)
+	routes.RegisterElevenLabsRoutes(app, cl, ml, appConfig)
+	routes.RegisterLocalAIRoutes(app, cl, ml, appConfig, galleryService)
+	routes.RegisterOpenAIRoutes(app, cl, ml, appConfig)
 	if !appConfig.DisableWebUI {
-		routes.RegisterUIRoutes(app, cl, ml, appConfig, galleryService, auth)
+		routes.RegisterUIRoutes(app, cl, ml, appConfig, galleryService)
 	}
-	routes.RegisterJINARoutes(app, cl, ml, appConfig, auth)
+	routes.RegisterJINARoutes(app, cl, ml, appConfig)
 
 	httpFS := http.FS(embedDirStatic)
 

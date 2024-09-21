@@ -3,42 +3,48 @@ GOTEST=$(GOCMD) test
 GOVET=$(GOCMD) vet
 BINARY_NAME=local-ai
 
-# llama.cpp versions
-GOLLAMA_STABLE_VERSION?=2b57a8ae43e4699d3dc5d1496a1ccd42922993be
-CPPLLAMA_VERSION?=858f6b73f6e57a62523d16a955d565254be889b4
+DETECT_LIBS?=true
 
-# gpt4all version
-GPT4ALL_REPO?=https://github.com/nomic-ai/gpt4all
-GPT4ALL_VERSION?=27a8b020c36b0df8f8b82a252d261cda47cf44b8
+# llama.cpp versions
+GOLLAMA_REPO?=https://github.com/go-skynet/go-llama.cpp
+GOLLAMA_VERSION?=2b57a8ae43e4699d3dc5d1496a1ccd42922993be
+CPPLLAMA_VERSION?=6026da52d6942b253df835070619775d849d0258
 
 # go-rwkv version
 RWKV_REPO?=https://github.com/donomii/go-rwkv.cpp
 RWKV_VERSION?=661e7ae26d442f5cfebd2a0881b44e8c55949ec6
 
 # whisper.cpp version
-WHISPER_CPP_VERSION?=58210d6a7634ea1e42e0a2dab611f4a0518731dc
+WHISPER_REPO?=https://github.com/ggerganov/whisper.cpp
+WHISPER_CPP_VERSION?=34972dbe221709323714fc8402f2e24041d48213
 
 # bert.cpp version
-BERT_VERSION?=6abe312cded14042f6b7c3cd8edf082713334a4d
+BERT_REPO?=https://github.com/go-skynet/go-bert.cpp
+BERT_VERSION?=710044b124545415f555e4260d16b146c725a6e4
 
 # go-piper version
+PIPER_REPO?=https://github.com/mudler/go-piper
 PIPER_VERSION?=9d0100873a7dbb0824dfea40e8cec70a1b110759
 
 # stablediffusion version
+STABLEDIFFUSION_REPO?=https://github.com/mudler/go-stable-diffusion
 STABLEDIFFUSION_VERSION?=4a3cd6aeae6f66ee57eae9a0075f8c58c3a6a38f
 
 # tinydream version
+TINYDREAM_REPO?=https://github.com/M0Rf30/go-tiny-dream
 TINYDREAM_VERSION?=c04fa463ace9d9a6464313aa5f9cd0f953b6c057
 
 export BUILD_TYPE?=
 export STABLE_BUILD_TYPE?=$(BUILD_TYPE)
 export CMAKE_ARGS?=
+export BACKEND_LIBS?=
 
 CGO_LDFLAGS?=
 CGO_LDFLAGS_WHISPER?=
+CGO_LDFLAGS_WHISPER+=-lggml
 CUDA_LIBPATH?=/usr/local/cuda/lib64/
 GO_TAGS?=
-BUILD_ID?=git
+BUILD_ID?=
 
 TEST_DIR=/tmp/test
 
@@ -48,19 +54,27 @@ RANDOM := $(shell bash -c 'echo $$RANDOM')
 
 VERSION?=$(shell git describe --always --tags || echo "dev" )
 # go tool nm ./local-ai | grep Commit
-LD_FLAGS?=
-override LD_FLAGS += -X "github.com/go-skynet/LocalAI/internal.Version=$(VERSION)"
-override LD_FLAGS += -X "github.com/go-skynet/LocalAI/internal.Commit=$(shell git rev-parse HEAD)"
+LD_FLAGS?=-s -w
+override LD_FLAGS += -X "github.com/mudler/LocalAI/internal.Version=$(VERSION)"
+override LD_FLAGS += -X "github.com/mudler/LocalAI/internal.Commit=$(shell git rev-parse HEAD)"
 
 OPTIONAL_TARGETS?=
 
-OS := $(shell uname -s)
+export OS := $(shell uname -s)
 ARCH := $(shell uname -m)
 GREEN  := $(shell tput -Txterm setaf 2)
 YELLOW := $(shell tput -Txterm setaf 3)
 WHITE  := $(shell tput -Txterm setaf 7)
 CYAN   := $(shell tput -Txterm setaf 6)
 RESET  := $(shell tput -Txterm sgr0)
+
+UPX?=
+# check if upx exists
+ifeq (, $(shell which upx))
+	UPX=
+else
+	UPX=$(shell which upx)
+endif
 
 # Default Docker bridge IP
 E2E_BRIDGE_IP?=172.17.0.1
@@ -70,7 +84,7 @@ UNAME_S := $(shell uname -s)
 endif
 
 ifeq ($(OS),Darwin)
-	
+
 	ifeq ($(OSX_SIGNING_IDENTITY),)
 		OSX_SIGNING_IDENTITY := $(shell security find-identity -v -p codesigning | grep '"' | head -n 1 | sed -E 's/.*"(.*)"/\1/')
 	endif
@@ -80,27 +94,40 @@ ifeq ($(OS),Darwin)
 		BUILD_TYPE=metal
 	# disable metal if on Darwin and any other value is explicitly passed.
 	else ifneq ($(BUILD_TYPE),metal)
-		CMAKE_ARGS+=-DLLAMA_METAL=OFF
-		export LLAMA_NO_ACCELERATE=1
+		CMAKE_ARGS+=-DGGML_METAL=OFF
+		export GGML_NO_ACCELERATE=1
+		export GGML_NO_METAL=1
 	endif
 
 	ifeq ($(BUILD_TYPE),metal)
 #			-lcblas 	removed: it seems to always be listed as a duplicate flag.
 		CGO_LDFLAGS += -framework Accelerate
 	endif
+else
+CGO_LDFLAGS_WHISPER+=-lgomp
 endif
 
 ifeq ($(BUILD_TYPE),openblas)
 	CGO_LDFLAGS+=-lopenblas
-	export WHISPER_OPENBLAS=1
+	export GGML_OPENBLAS=1
 endif
-
 
 ifeq ($(BUILD_TYPE),cublas)
 	CGO_LDFLAGS+=-lcublas -lcudart -L$(CUDA_LIBPATH)
-	export LLAMA_CUBLAS=1
-	export WHISPER_CUDA=1
-	CGO_LDFLAGS_WHISPER+=-L$(CUDA_LIBPATH)/stubs/ -lcuda
+	export GGML_CUDA=1
+	CGO_LDFLAGS_WHISPER+=-L$(CUDA_LIBPATH)/stubs/ -lcuda -lcufft
+endif
+
+ifeq ($(BUILD_TYPE),vulkan)
+	CMAKE_ARGS+=-DGGML_VULKAN=1
+endif
+
+ifneq (,$(findstring sycl,$(BUILD_TYPE)))
+	export GGML_SYCL=1
+endif
+
+ifeq ($(BUILD_TYPE),sycl_f16)
+	export GGML_SYCL_F16=1
 endif
 
 ifeq ($(BUILD_TYPE),hipblas)
@@ -111,27 +138,26 @@ ifeq ($(BUILD_TYPE),hipblas)
 	export CC=$(ROCM_HOME)/llvm/bin/clang
 	# llama-ggml has no hipblas support, so override it here.
 	export STABLE_BUILD_TYPE=
-	export WHISPER_HIPBLAS=1
-	GPU_TARGETS ?= gfx900,gfx90a,gfx1030,gfx1031,gfx1100
+	export GGML_HIPBLAS=1
+	GPU_TARGETS ?= gfx900,gfx906,gfx908,gfx940,gfx941,gfx942,gfx90a,gfx1030,gfx1031,gfx1100,gfx1101
 	AMDGPU_TARGETS ?= "$(GPU_TARGETS)"
-	CMAKE_ARGS+=-DLLAMA_HIPBLAS=ON -DAMDGPU_TARGETS="$(AMDGPU_TARGETS)" -DGPU_TARGETS="$(GPU_TARGETS)"
+	CMAKE_ARGS+=-DGGML_HIPBLAS=ON -DAMDGPU_TARGETS="$(AMDGPU_TARGETS)" -DGPU_TARGETS="$(GPU_TARGETS)"
 	CGO_LDFLAGS += -O3 --rtlib=compiler-rt -unwindlib=libgcc -lhipblas -lrocblas --hip-link -L${ROCM_HOME}/lib/llvm/lib
 endif
 
 ifeq ($(BUILD_TYPE),metal)
 	CGO_LDFLAGS+=-framework Foundation -framework Metal -framework MetalKit -framework MetalPerformanceShaders
-	export LLAMA_METAL=1
-	export WHISPER_METAL=1
+	export GGML_METAL=1
 endif
 
 ifeq ($(BUILD_TYPE),clblas)
 	CGO_LDFLAGS+=-lOpenCL -lclblast
-	export WHISPER_CLBLAST=1
+	export GGML_OPENBLAS=1
 endif
 
 # glibc-static or glibc-devel-static required
 ifeq ($(STATIC),true)
-	LD_FLAGS=-linkmode external -extldflags -static
+	LD_FLAGS+=-linkmode external -extldflags -static
 endif
 
 ifeq ($(findstring stablediffusion,$(GO_TAGS)),stablediffusion)
@@ -154,15 +180,18 @@ endif
 
 ALL_GRPC_BACKENDS=backend-assets/grpc/huggingface
 ALL_GRPC_BACKENDS+=backend-assets/grpc/bert-embeddings
-ALL_GRPC_BACKENDS+=backend-assets/grpc/llama-cpp
-ALL_GRPC_BACKENDS+=backend-assets/grpc/llama-cpp-noavx
+ALL_GRPC_BACKENDS+=backend-assets/grpc/llama-cpp-avx
+ALL_GRPC_BACKENDS+=backend-assets/grpc/llama-cpp-avx2
 ALL_GRPC_BACKENDS+=backend-assets/grpc/llama-cpp-fallback
 ALL_GRPC_BACKENDS+=backend-assets/grpc/llama-ggml
-ALL_GRPC_BACKENDS+=backend-assets/grpc/gpt4all
+ALL_GRPC_BACKENDS+=backend-assets/grpc/llama-cpp-grpc
+ALL_GRPC_BACKENDS+=backend-assets/util/llama-cpp-rpc-server
 ALL_GRPC_BACKENDS+=backend-assets/grpc/rwkv
 ALL_GRPC_BACKENDS+=backend-assets/grpc/whisper
 ALL_GRPC_BACKENDS+=backend-assets/grpc/local-store
 ALL_GRPC_BACKENDS+=$(OPTIONAL_GRPC)
+# Use filter-out to remove the specified backends
+ALL_GRPC_BACKENDS := $(filter-out $(SKIP_GRPC_BACKEND),$(ALL_GRPC_BACKENDS))
 
 GRPC_BACKENDS?=$(ALL_GRPC_BACKENDS) $(OPTIONAL_GRPC)
 TEST_PATHS?=./api/... ./pkg/... ./core/...
@@ -182,69 +211,97 @@ all: help
 
 ## BERT embeddings
 sources/go-bert.cpp:
-	git clone --recurse-submodules https://github.com/go-skynet/go-bert.cpp sources/go-bert.cpp
-	cd sources/go-bert.cpp && git checkout -b build $(BERT_VERSION) && git submodule update --init --recursive --depth 1
+	mkdir -p sources/go-bert.cpp
+	cd sources/go-bert.cpp && \
+	git init && \
+	git remote add origin $(BERT_REPO) && \
+	git fetch origin && \
+	git checkout $(BERT_VERSION) && \
+	git submodule update --init --recursive --depth 1 --single-branch
 
 sources/go-bert.cpp/libgobert.a: sources/go-bert.cpp
 	$(MAKE) -C sources/go-bert.cpp libgobert.a
 
 ## go-llama.cpp
 sources/go-llama.cpp:
-	git clone --recurse-submodules https://github.com/go-skynet/go-llama.cpp sources/go-llama.cpp
-	cd sources/go-llama.cpp && git checkout -b build $(GOLLAMA_STABLE_VERSION) && git submodule update --init --recursive --depth 1
+	mkdir -p sources/go-llama.cpp
+	cd sources/go-llama.cpp && \
+	git init && \
+	git remote add origin $(GOLLAMA_REPO) && \
+	git fetch origin && \
+	git checkout $(GOLLAMA_VERSION) && \
+	git submodule update --init --recursive --depth 1 --single-branch
 
 sources/go-llama.cpp/libbinding.a: sources/go-llama.cpp
 	$(MAKE) -C sources/go-llama.cpp BUILD_TYPE=$(STABLE_BUILD_TYPE) libbinding.a
 
 ## go-piper
 sources/go-piper:
-	git clone --recurse-submodules https://github.com/mudler/go-piper sources/go-piper
-	cd sources/go-piper && git checkout -b build $(PIPER_VERSION) && git submodule update --init --recursive --depth 1
+	mkdir -p sources/go-piper
+	cd sources/go-piper && \
+	git init && \
+	git remote add origin $(PIPER_REPO) && \
+	git fetch origin && \
+	git checkout $(PIPER_VERSION) && \
+	git submodule update --init --recursive --depth 1 --single-branch
 
 sources/go-piper/libpiper_binding.a: sources/go-piper
 	$(MAKE) -C sources/go-piper libpiper_binding.a example/main piper.o
 
-## GPT4ALL
-sources/gpt4all:
-	git clone --recurse-submodules $(GPT4ALL_REPO) sources/gpt4all
-	cd sources/gpt4all && git checkout -b build $(GPT4ALL_VERSION) && git submodule update --init --recursive --depth 1
-
-sources/gpt4all/gpt4all-bindings/golang/libgpt4all.a: sources/gpt4all
-	$(MAKE) -C sources/gpt4all/gpt4all-bindings/golang/ libgpt4all.a
 
 ## RWKV
 sources/go-rwkv.cpp:
-	git clone --recurse-submodules $(RWKV_REPO) sources/go-rwkv.cpp
-	cd sources/go-rwkv.cpp && git checkout -b build $(RWKV_VERSION) && git submodule update --init --recursive --depth 1
+	mkdir -p sources/go-rwkv.cpp
+	cd sources/go-rwkv.cpp && \
+	git init && \
+	git remote add origin $(RWKV_REPO) && \
+	git fetch origin && \
+	git checkout $(RWKV_VERSION) && \
+	git submodule update --init --recursive --depth 1 --single-branch
 
 sources/go-rwkv.cpp/librwkv.a: sources/go-rwkv.cpp
 	cd sources/go-rwkv.cpp && cd rwkv.cpp &&	cmake . -DRWKV_BUILD_SHARED_LIBRARY=OFF &&	cmake --build . && 	cp librwkv.a ..
 
 ## stable diffusion
 sources/go-stable-diffusion:
-	git clone --recurse-submodules https://github.com/mudler/go-stable-diffusion sources/go-stable-diffusion
-	cd sources/go-stable-diffusion && git checkout -b build $(STABLEDIFFUSION_VERSION) && git submodule update --init --recursive --depth 1
+	mkdir -p sources/go-stable-diffusion
+	cd sources/go-stable-diffusion && \
+	git init && \
+	git remote add origin $(STABLEDIFFUSION_REPO) && \
+	git fetch origin && \
+	git checkout $(STABLEDIFFUSION_VERSION) && \
+	git submodule update --init --recursive --depth 1 --single-branch
 
 sources/go-stable-diffusion/libstablediffusion.a: sources/go-stable-diffusion
 	CPATH="$(CPATH):/usr/include/opencv4" $(MAKE) -C sources/go-stable-diffusion libstablediffusion.a
 
 ## tiny-dream
 sources/go-tiny-dream:
-	git clone --recurse-submodules https://github.com/M0Rf30/go-tiny-dream sources/go-tiny-dream
-	cd sources/go-tiny-dream && git checkout -b build $(TINYDREAM_VERSION) && git submodule update --init --recursive --depth 1
+	mkdir -p sources/go-tiny-dream
+	cd sources/go-tiny-dream && \
+	git init && \
+	git remote add origin $(TINYDREAM_REPO) && \
+	git fetch origin && \
+	git checkout $(TINYDREAM_VERSION) && \
+	git submodule update --init --recursive --depth 1 --single-branch
 
 sources/go-tiny-dream/libtinydream.a: sources/go-tiny-dream
 	$(MAKE) -C sources/go-tiny-dream libtinydream.a
 
 ## whisper
 sources/whisper.cpp:
-	git clone https://github.com/ggerganov/whisper.cpp sources/whisper.cpp
-	cd sources/whisper.cpp && git checkout -b build $(WHISPER_CPP_VERSION) && git submodule update --init --recursive --depth 1
+	mkdir -p sources/whisper.cpp
+	cd sources/whisper.cpp && \
+	git init && \
+	git remote add origin $(WHISPER_REPO) && \
+	git fetch origin && \
+	git checkout $(WHISPER_CPP_VERSION) && \
+	git submodule update --init --recursive --depth 1 --single-branch
 
 sources/whisper.cpp/libwhisper.a: sources/whisper.cpp
-	cd sources/whisper.cpp && $(MAKE) libwhisper.a
+	cd sources/whisper.cpp && $(MAKE) libwhisper.a libggml.a
 
-get-sources: sources/go-llama.cpp sources/gpt4all sources/go-piper sources/go-rwkv.cpp sources/whisper.cpp sources/go-bert.cpp sources/go-stable-diffusion sources/go-tiny-dream
+get-sources: sources/go-llama.cpp sources/go-piper sources/go-rwkv.cpp sources/whisper.cpp sources/go-bert.cpp sources/go-stable-diffusion sources/go-tiny-dream backend/cpp/llama/llama.cpp
 
 replace:
 	$(GOCMD) mod edit -replace github.com/donomii/go-rwkv.cpp=$(CURDIR)/sources/go-rwkv.cpp
@@ -254,7 +311,6 @@ replace:
 	$(GOCMD) mod edit -replace github.com/M0Rf30/go-tiny-dream=$(CURDIR)/sources/go-tiny-dream
 	$(GOCMD) mod edit -replace github.com/mudler/go-piper=$(CURDIR)/sources/go-piper
 	$(GOCMD) mod edit -replace github.com/mudler/go-stable-diffusion=$(CURDIR)/sources/go-stable-diffusion
-	$(GOCMD) mod edit -replace github.com/nomic-ai/gpt4all/gpt4all-bindings/golang=$(CURDIR)/sources/gpt4all/gpt4all-bindings/golang
 	$(GOCMD) mod edit -replace github.com/go-skynet/go-llama.cpp=$(CURDIR)/sources/go-llama.cpp
 
 dropreplace:
@@ -265,7 +321,6 @@ dropreplace:
 	$(GOCMD) mod edit -dropreplace github.com/M0Rf30/go-tiny-dream
 	$(GOCMD) mod edit -dropreplace github.com/mudler/go-piper
 	$(GOCMD) mod edit -dropreplace github.com/mudler/go-stable-diffusion
-	$(GOCMD) mod edit -dropreplace github.com/nomic-ai/gpt4all/gpt4all-bindings/golang
 	$(GOCMD) mod edit -dropreplace github.com/go-skynet/go-llama.cpp
 
 prepare-sources: get-sources replace
@@ -275,7 +330,6 @@ prepare-sources: get-sources replace
 rebuild: ## Rebuilds the project
 	$(GOCMD) clean -cache
 	$(MAKE) -C sources/go-llama.cpp clean
-	$(MAKE) -C sources/gpt4all/gpt4all-bindings/golang/ clean
 	$(MAKE) -C sources/go-rwkv.cpp clean
 	$(MAKE) -C sources/whisper.cpp clean
 	$(MAKE) -C sources/go-stable-diffusion clean
@@ -311,21 +365,61 @@ build: prepare backend-assets grpcs ## Build the project
 	$(info ${GREEN}I BUILD_TYPE: ${YELLOW}$(BUILD_TYPE)${RESET})
 	$(info ${GREEN}I GO_TAGS: ${YELLOW}$(GO_TAGS)${RESET})
 	$(info ${GREEN}I LD_FLAGS: ${YELLOW}$(LD_FLAGS)${RESET})
+	$(info ${GREEN}I UPX: ${YELLOW}$(UPX)${RESET})
+ifneq ($(BACKEND_LIBS),)
+	$(MAKE) backend-assets/lib
+	cp -f $(BACKEND_LIBS) backend-assets/lib/
+endif
 	CGO_LDFLAGS="$(CGO_LDFLAGS)" $(GOCMD) build -ldflags "$(LD_FLAGS)" -tags "$(GO_TAGS)" -o $(BINARY_NAME) ./
 
 build-minimal:
-	BUILD_GRPC_FOR_BACKEND_LLAMA=true GRPC_BACKENDS="backend-assets/grpc/llama-cpp" GO_TAGS=none $(MAKE) build
+	BUILD_GRPC_FOR_BACKEND_LLAMA=true GRPC_BACKENDS="backend-assets/grpc/llama-cpp-avx2" GO_TAGS=p2p $(MAKE) build
 
 build-api:
-	BUILD_GRPC_FOR_BACKEND_LLAMA=true BUILD_API_ONLY=true GO_TAGS=none $(MAKE) build
+	BUILD_GRPC_FOR_BACKEND_LLAMA=true BUILD_API_ONLY=true GO_TAGS=p2p $(MAKE) build
 
-dist: build
+backend-assets/lib:
+	mkdir -p backend-assets/lib
+
+dist:
+	$(MAKE) backend-assets/grpc/llama-cpp-avx2
+ifeq ($(DETECT_LIBS),true)
+	scripts/prepare-libs.sh backend-assets/grpc/llama-cpp-avx2
+endif
+ifeq ($(OS),Darwin)
+	BUILD_TYPE=none $(MAKE) backend-assets/grpc/llama-cpp-fallback
+else
+	$(MAKE) backend-assets/grpc/llama-cpp-cuda
+	$(MAKE) backend-assets/grpc/llama-cpp-hipblas
+	$(MAKE) backend-assets/grpc/llama-cpp-sycl_f16
+	$(MAKE) backend-assets/grpc/llama-cpp-sycl_f32
+endif
+	GO_TAGS="tts p2p" $(MAKE) build
+ifeq ($(DETECT_LIBS),true)
+	scripts/prepare-libs.sh backend-assets/grpc/piper
+endif
+	GO_TAGS="tts p2p" STATIC=true $(MAKE) build
 	mkdir -p release
 # if BUILD_ID is empty, then we don't append it to the binary name
 ifeq ($(BUILD_ID),)
 	cp $(BINARY_NAME) release/$(BINARY_NAME)-$(OS)-$(ARCH)
+	shasum -a 256 release/$(BINARY_NAME)-$(OS)-$(ARCH) > release/$(BINARY_NAME)-$(OS)-$(ARCH).sha256
 else
 	cp $(BINARY_NAME) release/$(BINARY_NAME)-$(BUILD_ID)-$(OS)-$(ARCH)
+	shasum -a 256 release/$(BINARY_NAME)-$(BUILD_ID)-$(OS)-$(ARCH) > release/$(BINARY_NAME)-$(BUILD_ID)-$(OS)-$(ARCH).sha256
+endif
+
+dist-cross-linux-arm64:
+	CMAKE_ARGS="$(CMAKE_ARGS) -DGGML_NATIVE=off" GRPC_BACKENDS="backend-assets/grpc/llama-cpp-fallback backend-assets/grpc/llama-cpp-grpc backend-assets/util/llama-cpp-rpc-server" GO_TAGS="p2p" \
+	STATIC=true $(MAKE) build
+	mkdir -p release
+# if BUILD_ID is empty, then we don't append it to the binary name
+ifeq ($(BUILD_ID),)
+	cp $(BINARY_NAME) release/$(BINARY_NAME)-$(OS)-arm64
+	shasum -a 256 release/$(BINARY_NAME)-$(OS)-arm64 > release/$(BINARY_NAME)-$(OS)-arm64.sha256
+else
+	cp $(BINARY_NAME) release/$(BINARY_NAME)-$(BUILD_ID)-$(OS)-arm64
+	shasum -a 256 release/$(BINARY_NAME)-$(BUILD_ID)-$(OS)-arm64 > release/$(BINARY_NAME)-$(BUILD_ID)-$(OS)-arm64.sha256
 endif
 
 osx-signed: build
@@ -355,8 +449,7 @@ test: prepare test-models/testmodel.ggml grpcs
 	export GO_TAGS="tts stablediffusion debug"
 	$(MAKE) prepare-test
 	HUGGINGFACE_GRPC=$(abspath ./)/backend/python/sentencetransformers/run.sh TEST_DIR=$(abspath ./)/test-dir/ FIXTURES=$(abspath ./)/tests/fixtures CONFIG_FILE=$(abspath ./)/test-models/config.yaml MODELS_PATH=$(abspath ./)/test-models \
-	$(GOCMD) run github.com/onsi/ginkgo/v2/ginkgo --label-filter="!gpt4all && !llama && !llama-gguf"  --flake-attempts $(TEST_FLAKES) --fail-fast -v -r $(TEST_PATHS)
-	$(MAKE) test-gpt4all
+	$(GOCMD) run github.com/onsi/ginkgo/v2/ginkgo --label-filter="!llama && !llama-gguf"  --flake-attempts $(TEST_FLAKES) --fail-fast -v -r $(TEST_PATHS)
 	$(MAKE) test-llama
 	$(MAKE) test-llama-gguf
 	$(MAKE) test-tts
@@ -366,7 +459,7 @@ prepare-e2e:
 	mkdir -p $(TEST_DIR)
 	cp -rfv $(abspath ./tests/e2e-fixtures)/gpu.yaml $(TEST_DIR)/gpu.yaml
 	test -e $(TEST_DIR)/ggllm-test-model.bin || wget -q https://huggingface.co/TheBloke/CodeLlama-7B-Instruct-GGUF/resolve/main/codellama-7b-instruct.Q2_K.gguf -O $(TEST_DIR)/ggllm-test-model.bin
-	docker build --build-arg GRPC_BACKENDS="$(GRPC_BACKENDS)" --build-arg IMAGE_TYPE=core --build-arg BUILD_TYPE=$(BUILD_TYPE) --build-arg CUDA_MAJOR_VERSION=11 --build-arg CUDA_MINOR_VERSION=7 --build-arg FFMPEG=true -t localai-tests .
+	docker build --build-arg GRPC_BACKENDS="$(GRPC_BACKENDS)" --build-arg IMAGE_TYPE=core --build-arg BUILD_TYPE=$(BUILD_TYPE) --build-arg CUDA_MAJOR_VERSION=12 --build-arg CUDA_MINOR_VERSION=0 --build-arg FFMPEG=true -t localai-tests .
 
 run-e2e-image:
 	ls -liah $(abspath ./tests/e2e-fixtures)
@@ -385,10 +478,6 @@ test-e2e:
 teardown-e2e:
 	rm -rf $(TEST_DIR) || true
 	docker stop $$(docker ps -q --filter ancestor=localai-tests)
-
-test-gpt4all: prepare-test
-	TEST_DIR=$(abspath ./)/test-dir/ FIXTURES=$(abspath ./)/tests/fixtures CONFIG_FILE=$(abspath ./)/test-models/config.yaml MODELS_PATH=$(abspath ./)/test-models \
-	$(GOCMD) run github.com/onsi/ginkgo/v2/ginkgo --label-filter="gpt4all" --flake-attempts 5 -v -r $(TEST_PATHS)
 
 test-llama: prepare-test
 	TEST_DIR=$(abspath ./)/test-dir/ FIXTURES=$(abspath ./)/tests/fixtures CONFIG_FILE=$(abspath ./)/test-models/config.yaml MODELS_PATH=$(abspath ./)/test-models \
@@ -436,7 +525,7 @@ protogen-clean: protogen-go-clean protogen-python-clean
 .PHONY: protogen-go
 protogen-go:
 	mkdir -p pkg/grpc/proto
-	protoc -Ibackend/ --go_out=pkg/grpc/proto/ --go_opt=paths=source_relative --go-grpc_out=pkg/grpc/proto/ --go-grpc_opt=paths=source_relative \
+	protoc --experimental_allow_proto3_optional -Ibackend/ --go_out=pkg/grpc/proto/ --go_opt=paths=source_relative --go-grpc_out=pkg/grpc/proto/ --go-grpc_opt=paths=source_relative \
     backend/backend.proto
 
 .PHONY: protogen-go-clean
@@ -445,10 +534,10 @@ protogen-go-clean:
 	$(RM) bin/*
 
 .PHONY: protogen-python
-protogen-python: autogptq-protogen bark-protogen coqui-protogen diffusers-protogen exllama-protogen exllama2-protogen mamba-protogen petals-protogen rerankers-protogen sentencetransformers-protogen transformers-protogen parler-tts-protogen transformers-musicgen-protogen vall-e-x-protogen vllm-protogen
+protogen-python: autogptq-protogen bark-protogen coqui-protogen diffusers-protogen exllama2-protogen mamba-protogen rerankers-protogen sentencetransformers-protogen transformers-protogen parler-tts-protogen transformers-musicgen-protogen vall-e-x-protogen vllm-protogen openvoice-protogen
 
 .PHONY: protogen-python-clean
-protogen-python-clean: autogptq-protogen-clean bark-protogen-clean coqui-protogen-clean diffusers-protogen-clean exllama-protogen-clean exllama2-protogen-clean mamba-protogen-clean petals-protogen-clean sentencetransformers-protogen-clean rerankers-protogen-clean transformers-protogen-clean transformers-musicgen-protogen-clean parler-tts-protogen-clean vall-e-x-protogen-clean vllm-protogen-clean
+protogen-python-clean: autogptq-protogen-clean bark-protogen-clean coqui-protogen-clean diffusers-protogen-clean  exllama2-protogen-clean mamba-protogen-clean sentencetransformers-protogen-clean rerankers-protogen-clean transformers-protogen-clean transformers-musicgen-protogen-clean parler-tts-protogen-clean vall-e-x-protogen-clean vllm-protogen-clean openvoice-protogen-clean
 
 .PHONY: autogptq-protogen
 autogptq-protogen:
@@ -482,14 +571,6 @@ diffusers-protogen:
 diffusers-protogen-clean:
 	$(MAKE) -C backend/python/diffusers protogen-clean
 
-.PHONY: exllama-protogen
-exllama-protogen:
-	$(MAKE) -C backend/python/exllama protogen
-
-.PHONY: exllama-protogen-clean
-exllama-protogen-clean:
-	$(MAKE) -C backend/python/exllama protogen-clean
-
 .PHONY: exllama2-protogen
 exllama2-protogen:
 	$(MAKE) -C backend/python/exllama2 protogen
@@ -505,14 +586,6 @@ mamba-protogen:
 .PHONY: mamba-protogen-clean
 mamba-protogen-clean:
 	$(MAKE) -C backend/python/mamba protogen-clean
-
-.PHONY: petals-protogen
-petals-protogen:
-	$(MAKE) -C backend/python/petals protogen
-
-.PHONY: petals-protogen-clean
-petals-protogen-clean:
-	$(MAKE) -C backend/python/petals protogen-clean
 
 .PHONY: rerankers-protogen
 rerankers-protogen:
@@ -562,6 +635,14 @@ vall-e-x-protogen:
 vall-e-x-protogen-clean:
 	$(MAKE) -C backend/python/vall-e-x protogen-clean
 
+.PHONY: openvoice-protogen
+openvoice-protogen:
+	$(MAKE) -C backend/python/openvoice protogen
+
+.PHONY: openvoice-protogen-clean
+openvoice-protogen-clean:
+	$(MAKE) -C backend/python/openvoice protogen-clean
+
 .PHONY: vllm-protogen
 vllm-protogen:
 	$(MAKE) -C backend/python/vllm protogen
@@ -585,8 +666,7 @@ prepare-extra-conda-environments: protogen-python
 	$(MAKE) -C backend/python/transformers-musicgen
 	$(MAKE) -C backend/python/parler-tts
 	$(MAKE) -C backend/python/vall-e-x
-	$(MAKE) -C backend/python/exllama
-	$(MAKE) -C backend/python/petals
+	$(MAKE) -C backend/python/openvoice
 	$(MAKE) -C backend/python/exllama2
 
 prepare-test-extra: protogen-python
@@ -607,25 +687,21 @@ backend-assets/espeak-ng-data: sources/go-piper sources/go-piper/libpiper_bindin
 	mkdir -p backend-assets/espeak-ng-data
 	@cp -rf sources/go-piper/piper-phonemize/pi/share/espeak-ng-data/. backend-assets/espeak-ng-data
 
-backend-assets/gpt4all: sources/gpt4all sources/gpt4all/gpt4all-bindings/golang/libgpt4all.a
-	mkdir -p backend-assets/gpt4all
-	@cp sources/gpt4all/gpt4all-bindings/golang/buildllm/*.so backend-assets/gpt4all/ || true
-	@cp sources/gpt4all/gpt4all-bindings/golang/buildllm/*.dylib backend-assets/gpt4all/ || true
-	@cp sources/gpt4all/gpt4all-bindings/golang/buildllm/*.dll backend-assets/gpt4all/ || true
-
 backend-assets/grpc: protogen-go replace
 	mkdir -p backend-assets/grpc
 
 backend-assets/grpc/bert-embeddings: sources/go-bert.cpp sources/go-bert.cpp/libgobert.a backend-assets/grpc
 	CGO_LDFLAGS="$(CGO_LDFLAGS)" C_INCLUDE_PATH=$(CURDIR)/sources/go-bert.cpp LIBRARY_PATH=$(CURDIR)/sources/go-bert.cpp \
 	$(GOCMD) build -ldflags "$(LD_FLAGS)" -tags "$(GO_TAGS)" -o backend-assets/grpc/bert-embeddings ./backend/go/llm/bert/
-
-backend-assets/grpc/gpt4all: sources/gpt4all sources/gpt4all/gpt4all-bindings/golang/libgpt4all.a backend-assets/gpt4all backend-assets/grpc
-	CGO_LDFLAGS="$(CGO_LDFLAGS)" C_INCLUDE_PATH=$(CURDIR)/sources/gpt4all/gpt4all-bindings/golang/ LIBRARY_PATH=$(CURDIR)/sources/gpt4all/gpt4all-bindings/golang/ \
-	$(GOCMD) build -ldflags "$(LD_FLAGS)" -tags "$(GO_TAGS)" -o backend-assets/grpc/gpt4all ./backend/go/llm/gpt4all/
+ifneq ($(UPX),)
+	$(UPX) backend-assets/grpc/bert-embeddings
+endif
 
 backend-assets/grpc/huggingface: backend-assets/grpc
 	$(GOCMD) build -ldflags "$(LD_FLAGS)" -tags "$(GO_TAGS)" -o backend-assets/grpc/huggingface ./backend/go/llm/langchain/
+ifneq ($(UPX),)
+	$(UPX) backend-assets/grpc/huggingface
+endif
 
 backend/cpp/llama/llama.cpp:
 	LLAMA_VERSION=$(CPPLLAMA_VERSION) $(MAKE) -C backend/cpp/llama llama.cpp
@@ -652,57 +728,125 @@ else
 	LLAMA_VERSION=$(CPPLLAMA_VERSION) $(MAKE) -C backend/cpp/${VARIANT} grpc-server
 endif
 
-backend-assets/grpc/llama-cpp: backend-assets/grpc
-	$(info ${GREEN}I llama-cpp build info:standard${RESET})
-	cp -rf backend/cpp/llama backend/cpp/llama-default
-	$(MAKE) -C backend/cpp/llama-default purge
-	$(MAKE) VARIANT="llama-default" build-llama-cpp-grpc-server
-	cp -rfv backend/cpp/llama-default/grpc-server backend-assets/grpc/llama-cpp
-# TODO: every binary should have its own folder instead, so can have different metal implementations
-ifeq ($(BUILD_TYPE),metal)
-	cp backend/cpp/llama-default/llama.cpp/build/bin/default.metallib backend-assets/grpc/
-endif
+# This target is for manually building a variant with-auto detected flags
+backend-assets/grpc/llama-cpp: backend-assets/grpc backend/cpp/llama/llama.cpp
+	cp -rf backend/cpp/llama backend/cpp/llama-cpp
+	$(MAKE) -C backend/cpp/llama-cpp purge
+	$(info ${GREEN}I llama-cpp build info:avx2${RESET})
+	$(MAKE) VARIANT="llama-cpp" build-llama-cpp-grpc-server
+	cp -rfv backend/cpp/llama-cpp/grpc-server backend-assets/grpc/llama-cpp
 
-backend-assets/grpc/llama-cpp-noavx: backend-assets/grpc
-	cp -rf backend/cpp/llama backend/cpp/llama-noavx
-	$(MAKE) -C backend/cpp/llama-noavx purge
-	$(info ${GREEN}I llama-cpp build info:noavx${RESET})
-	CMAKE_ARGS="$(CMAKE_ARGS) -DLLAMA_AVX512=OFF -DLLAMA_AVX2=OFF" $(MAKE) VARIANT="llama-noavx" build-llama-cpp-grpc-server
-	cp -rfv backend/cpp/llama-noavx/grpc-server backend-assets/grpc/llama-cpp-noavx
+backend-assets/grpc/llama-cpp-avx2: backend-assets/grpc backend/cpp/llama/llama.cpp
+	cp -rf backend/cpp/llama backend/cpp/llama-avx2
+	$(MAKE) -C backend/cpp/llama-avx2 purge
+	$(info ${GREEN}I llama-cpp build info:avx2${RESET})
+	CMAKE_ARGS="$(CMAKE_ARGS) -DGGML_AVX=on -DGGML_AVX2=on -DGGML_AVX512=off -DGGML_FMA=on -DGGML_F16C=on" $(MAKE) VARIANT="llama-avx2" build-llama-cpp-grpc-server
+	cp -rfv backend/cpp/llama-avx2/grpc-server backend-assets/grpc/llama-cpp-avx2
 
-backend-assets/grpc/llama-cpp-fallback: backend-assets/grpc
+backend-assets/grpc/llama-cpp-avx: backend-assets/grpc backend/cpp/llama/llama.cpp
+	cp -rf backend/cpp/llama backend/cpp/llama-avx
+	$(MAKE) -C backend/cpp/llama-avx purge
+	$(info ${GREEN}I llama-cpp build info:avx${RESET})
+	CMAKE_ARGS="$(CMAKE_ARGS) -DGGML_AVX=on -DGGML_AVX2=off -DGGML_AVX512=off -DGGML_FMA=off -DGGML_F16C=off" $(MAKE) VARIANT="llama-avx" build-llama-cpp-grpc-server
+	cp -rfv backend/cpp/llama-avx/grpc-server backend-assets/grpc/llama-cpp-avx
+
+backend-assets/grpc/llama-cpp-fallback: backend-assets/grpc backend/cpp/llama/llama.cpp
 	cp -rf backend/cpp/llama backend/cpp/llama-fallback
 	$(MAKE) -C backend/cpp/llama-fallback purge
 	$(info ${GREEN}I llama-cpp build info:fallback${RESET})
-	CMAKE_ARGS="$(CMAKE_ARGS) -DLLAMA_F16C=OFF -DLLAMA_AVX512=OFF -DLLAMA_AVX2=OFF -DLLAMA_FMA=OFF" $(MAKE) VARIANT="llama-fallback" build-llama-cpp-grpc-server
+	CMAKE_ARGS="$(CMAKE_ARGS) -DGGML_AVX=off -DGGML_AVX2=off -DGGML_AVX512=off -DGGML_FMA=off -DGGML_F16C=off" $(MAKE) VARIANT="llama-fallback" build-llama-cpp-grpc-server
 	cp -rfv backend/cpp/llama-fallback/grpc-server backend-assets/grpc/llama-cpp-fallback
+# TODO: every binary should have its own folder instead, so can have different metal implementations
+ifeq ($(BUILD_TYPE),metal)
+	cp backend/cpp/llama-fallback/llama.cpp/build/bin/default.metallib backend-assets/grpc/
+endif
+
+backend-assets/grpc/llama-cpp-cuda: backend-assets/grpc backend/cpp/llama/llama.cpp
+	cp -rf backend/cpp/llama backend/cpp/llama-cuda
+	$(MAKE) -C backend/cpp/llama-cuda purge
+	$(info ${GREEN}I llama-cpp build info:cuda${RESET})
+	CMAKE_ARGS="$(CMAKE_ARGS) -DGGML_AVX=on -DGGML_AVX2=off -DGGML_AVX512=off -DGGML_FMA=off -DGGML_F16C=off -DGGML_CUDA=ON" $(MAKE) VARIANT="llama-cuda" build-llama-cpp-grpc-server
+	cp -rfv backend/cpp/llama-cuda/grpc-server backend-assets/grpc/llama-cpp-cuda
+
+backend-assets/grpc/llama-cpp-hipblas: backend-assets/grpc backend/cpp/llama/llama.cpp
+	cp -rf backend/cpp/llama backend/cpp/llama-hipblas
+	$(MAKE) -C backend/cpp/llama-hipblas purge
+	$(info ${GREEN}I llama-cpp build info:hipblas${RESET})
+	BUILD_TYPE="hipblas" $(MAKE) VARIANT="llama-hipblas" build-llama-cpp-grpc-server
+	cp -rfv backend/cpp/llama-hipblas/grpc-server backend-assets/grpc/llama-cpp-hipblas
+
+backend-assets/grpc/llama-cpp-sycl_f16: backend-assets/grpc backend/cpp/llama/llama.cpp
+	cp -rf backend/cpp/llama backend/cpp/llama-sycl_f16
+	$(MAKE) -C backend/cpp/llama-sycl_f16 purge
+	$(info ${GREEN}I llama-cpp build info:sycl_f16${RESET})
+	BUILD_TYPE="sycl_f16" $(MAKE) VARIANT="llama-sycl_f16" build-llama-cpp-grpc-server
+	cp -rfv backend/cpp/llama-sycl_f16/grpc-server backend-assets/grpc/llama-cpp-sycl_f16
+
+backend-assets/grpc/llama-cpp-sycl_f32: backend-assets/grpc backend/cpp/llama/llama.cpp
+	cp -rf backend/cpp/llama backend/cpp/llama-sycl_f32
+	$(MAKE) -C backend/cpp/llama-sycl_f32 purge
+	$(info ${GREEN}I llama-cpp build info:sycl_f32${RESET})
+	BUILD_TYPE="sycl_f32" $(MAKE) VARIANT="llama-sycl_f32" build-llama-cpp-grpc-server
+	cp -rfv backend/cpp/llama-sycl_f32/grpc-server backend-assets/grpc/llama-cpp-sycl_f32
+
+backend-assets/grpc/llama-cpp-grpc: backend-assets/grpc backend/cpp/llama/llama.cpp
+	cp -rf backend/cpp/llama backend/cpp/llama-grpc
+	$(MAKE) -C backend/cpp/llama-grpc purge
+	$(info ${GREEN}I llama-cpp build info:grpc${RESET})
+	CMAKE_ARGS="$(CMAKE_ARGS) -DGGML_RPC=ON -DGGML_AVX=off -DGGML_AVX2=off -DGGML_AVX512=off -DGGML_FMA=off -DGGML_F16C=off" TARGET="--target grpc-server --target rpc-server" $(MAKE) VARIANT="llama-grpc" build-llama-cpp-grpc-server
+	cp -rfv backend/cpp/llama-grpc/grpc-server backend-assets/grpc/llama-cpp-grpc
+
+backend-assets/util/llama-cpp-rpc-server: backend-assets/grpc/llama-cpp-grpc
+	mkdir -p backend-assets/util/
+	cp -rf backend/cpp/llama-grpc/llama.cpp/build/bin/rpc-server backend-assets/util/llama-cpp-rpc-server
 
 backend-assets/grpc/llama-ggml: sources/go-llama.cpp sources/go-llama.cpp/libbinding.a backend-assets/grpc
 	CGO_LDFLAGS="$(CGO_LDFLAGS)" C_INCLUDE_PATH=$(CURDIR)/sources/go-llama.cpp LIBRARY_PATH=$(CURDIR)/sources/go-llama.cpp \
 	$(GOCMD) build -ldflags "$(LD_FLAGS)" -tags "$(GO_TAGS)" -o backend-assets/grpc/llama-ggml ./backend/go/llm/llama-ggml/
+ifneq ($(UPX),)
+	$(UPX) backend-assets/grpc/llama-ggml
+endif
 
 backend-assets/grpc/piper: sources/go-piper sources/go-piper/libpiper_binding.a backend-assets/grpc backend-assets/espeak-ng-data
 	CGO_CXXFLAGS="$(PIPER_CGO_CXXFLAGS)" CGO_LDFLAGS="$(PIPER_CGO_LDFLAGS)" LIBRARY_PATH=$(CURDIR)/sources/go-piper \
 	$(GOCMD) build -ldflags "$(LD_FLAGS)" -tags "$(GO_TAGS)" -o backend-assets/grpc/piper ./backend/go/tts/
+ifneq ($(UPX),)
+	$(UPX) backend-assets/grpc/piper
+endif
 
 backend-assets/grpc/rwkv: sources/go-rwkv.cpp sources/go-rwkv.cpp/librwkv.a backend-assets/grpc
 	CGO_LDFLAGS="$(CGO_LDFLAGS)" C_INCLUDE_PATH=$(CURDIR)/sources/go-rwkv.cpp LIBRARY_PATH=$(CURDIR)/sources/go-rwkv.cpp \
 	$(GOCMD) build -ldflags "$(LD_FLAGS)" -tags "$(GO_TAGS)" -o backend-assets/grpc/rwkv ./backend/go/llm/rwkv
+ifneq ($(UPX),)
+	$(UPX) backend-assets/grpc/rwkv
+endif
 
 backend-assets/grpc/stablediffusion: sources/go-stable-diffusion sources/go-stable-diffusion/libstablediffusion.a backend-assets/grpc
 	CGO_LDFLAGS="$(CGO_LDFLAGS)" CPATH="$(CPATH):$(CURDIR)/sources/go-stable-diffusion/:/usr/include/opencv4" LIBRARY_PATH=$(CURDIR)/sources/go-stable-diffusion/ \
 	$(GOCMD) build -ldflags "$(LD_FLAGS)" -tags "$(GO_TAGS)" -o backend-assets/grpc/stablediffusion ./backend/go/image/stablediffusion
+ifneq ($(UPX),)
+	$(UPX) backend-assets/grpc/stablediffusion
+endif
 
 backend-assets/grpc/tinydream: sources/go-tiny-dream sources/go-tiny-dream/libtinydream.a backend-assets/grpc
 	CGO_LDFLAGS="$(CGO_LDFLAGS)" LIBRARY_PATH=$(CURDIR)/go-tiny-dream \
 	$(GOCMD) build -ldflags "$(LD_FLAGS)" -tags "$(GO_TAGS)" -o backend-assets/grpc/tinydream ./backend/go/image/tinydream
+ifneq ($(UPX),)
+	$(UPX) backend-assets/grpc/tinydream
+endif
 
 backend-assets/grpc/whisper: sources/whisper.cpp sources/whisper.cpp/libwhisper.a backend-assets/grpc
-	CGO_LDFLAGS="$(CGO_LDFLAGS) $(CGO_LDFLAGS_WHISPER)" C_INCLUDE_PATH=$(CURDIR)/sources/whisper.cpp LIBRARY_PATH=$(CURDIR)/sources/whisper.cpp \
-	$(GOCMD) build -ldflags "$(LD_FLAGS)" -tags "$(GO_TAGS)" -o backend-assets/grpc/whisper ./backend/go/transcribe/
+	CGO_LDFLAGS="$(CGO_LDFLAGS) $(CGO_LDFLAGS_WHISPER)" C_INCLUDE_PATH="$(CURDIR)/sources/whisper.cpp/include:$(CURDIR)/sources/whisper.cpp/ggml/include" LIBRARY_PATH=$(CURDIR)/sources/whisper.cpp \
+	$(GOCMD) build -ldflags "$(LD_FLAGS)" -tags "$(GO_TAGS)" -o backend-assets/grpc/whisper ./backend/go/transcribe/whisper
+ifneq ($(UPX),)
+	$(UPX) backend-assets/grpc/whisper
+endif
 
 backend-assets/grpc/local-store: backend-assets/grpc
 	$(GOCMD) build -ldflags "$(LD_FLAGS)" -tags "$(GO_TAGS)" -o backend-assets/grpc/local-store ./backend/go/stores/
+ifneq ($(UPX),)
+	$(UPX) backend-assets/grpc/local-store
+endif
 
 grpcs: prepare $(GRPC_BACKENDS)
 
@@ -719,7 +863,18 @@ docker:
 		--build-arg MAKEFLAGS="$(DOCKER_MAKEFLAGS)" \
 		--build-arg BUILD_TYPE=$(BUILD_TYPE) \
 		-t $(DOCKER_IMAGE) .
-	
+
+docker-cuda11:
+	docker build \
+		--build-arg CUDA_MAJOR_VERSION=11 \
+		--build-arg CUDA_MINOR_VERSION=8 \
+		--build-arg BASE_IMAGE=$(BASE_IMAGE) \
+		--build-arg IMAGE_TYPE=$(IMAGE_TYPE) \
+		--build-arg GO_TAGS="$(GO_TAGS)" \
+		--build-arg MAKEFLAGS="$(DOCKER_MAKEFLAGS)" \
+		--build-arg BUILD_TYPE=$(BUILD_TYPE) \
+		-t $(DOCKER_IMAGE)-cuda11 .
+
 docker-aio:
 	@echo "Building AIO image with base $(BASE_IMAGE) as $(DOCKER_AIO_IMAGE)"
 	docker build \
@@ -733,7 +888,7 @@ docker-aio-all:
 
 docker-image-intel:
 	docker build \
-		--build-arg BASE_IMAGE=intel/oneapi-basekit:2024.1.0-devel-ubuntu22.04 \
+		--build-arg BASE_IMAGE=intel/oneapi-basekit:2024.2.0-devel-ubuntu22.04 \
 		--build-arg IMAGE_TYPE=$(IMAGE_TYPE) \
 		--build-arg GO_TAGS="none" \
 		--build-arg MAKEFLAGS="$(DOCKER_MAKEFLAGS)" \
@@ -741,7 +896,7 @@ docker-image-intel:
 
 docker-image-intel-xpu:
 	docker build \
-		--build-arg BASE_IMAGE=intel/oneapi-basekit:2024.1.0-devel-ubuntu22.04 \
+		--build-arg BASE_IMAGE=intel/oneapi-basekit:2024.2.0-devel-ubuntu22.04 \
 		--build-arg IMAGE_TYPE=$(IMAGE_TYPE) \
 		--build-arg GO_TAGS="none" \
 		--build-arg MAKEFLAGS="$(DOCKER_MAKEFLAGS)" \
@@ -750,3 +905,25 @@ docker-image-intel-xpu:
 .PHONY: swagger
 swagger:
 	swag init -g core/http/app.go --output swagger
+
+.PHONY: gen-assets
+gen-assets:
+	$(GOCMD) run core/dependencies_manager/manager.go embedded/webui_static.yaml core/http/static/assets
+
+## Documentation
+docs/layouts/_default:
+	mkdir -p docs/layouts/_default
+
+docs/static/gallery.html: docs/layouts/_default
+	$(GOCMD) run ./.github/ci/modelslist.go ./gallery/index.yaml > docs/static/gallery.html
+
+docs/public: docs/layouts/_default docs/static/gallery.html
+	cd docs && hugo --minify
+
+docs-clean:
+	rm -rf docs/public
+	rm -rf docs/static/gallery.html
+
+.PHONY: docs
+docs: docs/static/gallery.html
+	cd docs && hugo serve

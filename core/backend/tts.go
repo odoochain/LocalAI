@@ -6,30 +6,23 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/go-skynet/LocalAI/core/config"
+	"github.com/mudler/LocalAI/core/config"
 
-	"github.com/go-skynet/LocalAI/pkg/grpc/proto"
-	model "github.com/go-skynet/LocalAI/pkg/model"
-	"github.com/go-skynet/LocalAI/pkg/utils"
+	"github.com/mudler/LocalAI/pkg/grpc/proto"
+	"github.com/mudler/LocalAI/pkg/model"
+	"github.com/mudler/LocalAI/pkg/utils"
 )
 
-func generateUniqueFileName(dir, baseName, ext string) string {
-	counter := 1
-	fileName := baseName + ext
-
-	for {
-		filePath := filepath.Join(dir, fileName)
-		_, err := os.Stat(filePath)
-		if os.IsNotExist(err) {
-			return fileName
-		}
-
-		counter++
-		fileName = fmt.Sprintf("%s_%d%s", baseName, counter, ext)
-	}
-}
-
-func ModelTTS(backend, text, modelFile, voice string, loader *model.ModelLoader, appConfig *config.ApplicationConfig, backendConfig config.BackendConfig) (string, *proto.Result, error) {
+func ModelTTS(
+	backend,
+	text,
+	modelFile,
+	voice,
+	language string,
+	loader *model.ModelLoader,
+	appConfig *config.ApplicationConfig,
+	backendConfig config.BackendConfig,
+) (string, *proto.Result, error) {
 	bb := backend
 	if bb == "" {
 		bb = model.PiperBackend
@@ -57,7 +50,7 @@ func ModelTTS(backend, text, modelFile, voice string, loader *model.ModelLoader,
 		return "", nil, fmt.Errorf("failed creating audio directory: %s", err)
 	}
 
-	fileName := generateUniqueFileName(appConfig.AudioDir, "tts", ".wav")
+	fileName := utils.GenerateUniqueFileName(appConfig.AudioDir, "tts", ".wav")
 	filePath := filepath.Join(appConfig.AudioDir, fileName)
 
 	// If the model file is not empty, we pass it joined with the model path
@@ -79,11 +72,20 @@ func ModelTTS(backend, text, modelFile, voice string, loader *model.ModelLoader,
 	}
 
 	res, err := ttsModel.TTS(context.Background(), &proto.TTSRequest{
-		Text:  text,
-		Model: modelPath,
-		Voice: voice,
-		Dst:   filePath,
+		Text:     text,
+		Model:    modelPath,
+		Voice:    voice,
+		Dst:      filePath,
+		Language: &language,
 	})
+	if err != nil {
+		return "", nil, err
+	}
+
+	// return RPC error if any
+	if !res.Success {
+		return "", nil, fmt.Errorf(res.Message)
+	}
 
 	return filePath, res, err
 }

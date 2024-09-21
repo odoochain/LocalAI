@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/go-skynet/LocalAI/core/config"
-	"github.com/go-skynet/LocalAI/core/schema"
-	"github.com/go-skynet/LocalAI/pkg/grpc/proto"
-	"github.com/go-skynet/LocalAI/pkg/model"
+	"github.com/mudler/LocalAI/core/config"
+	"github.com/mudler/LocalAI/core/schema"
+	"github.com/mudler/LocalAI/pkg/grpc/proto"
+	"github.com/mudler/LocalAI/pkg/model"
 
 	"github.com/rs/zerolog/log"
 
@@ -107,7 +107,7 @@ func (bms BackendMonitorService) CheckAndSample(modelName string) (*proto.Status
 		return nil, err
 	}
 	modelAddr := bms.modelLoader.CheckIsLoaded(backendId)
-	if modelAddr == "" {
+	if modelAddr == nil {
 		return nil, fmt.Errorf("backend %s is not currently loaded", backendId)
 	}
 

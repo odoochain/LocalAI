@@ -8,13 +8,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-skynet/LocalAI/core/backend"
-	"github.com/go-skynet/LocalAI/core/config"
-	"github.com/go-skynet/LocalAI/core/schema"
-	"github.com/go-skynet/LocalAI/pkg/functions"
-	model "github.com/go-skynet/LocalAI/pkg/model"
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
+	"github.com/mudler/LocalAI/core/backend"
+	"github.com/mudler/LocalAI/core/config"
+	"github.com/mudler/LocalAI/core/schema"
+	"github.com/mudler/LocalAI/pkg/functions"
+	model "github.com/mudler/LocalAI/pkg/model"
 	"github.com/rs/zerolog/log"
 	"github.com/valyala/fasthttp"
 )
@@ -25,16 +25,15 @@ import (
 // @Success 200 {object} schema.OpenAIResponse "Response"
 // @Router /v1/chat/completions [post]
 func ChatEndpoint(cl *config.BackendConfigLoader, ml *model.ModelLoader, startupOptions *config.ApplicationConfig) func(c *fiber.Ctx) error {
-	emptyMessage := ""
-	id := uuid.New().String()
-	created := int(time.Now().Unix())
+	var id, textContentToReturn string
+	var created int
 
 	process := func(s string, req *schema.OpenAIRequest, config *config.BackendConfig, loader *model.ModelLoader, responses chan schema.OpenAIResponse) {
 		initialMessage := schema.OpenAIResponse{
 			ID:      id,
 			Created: created,
 			Model:   req.Model, // we have to return what the user sent here, due to OpenAI spec.
-			Choices: []schema.Choice{{Delta: &schema.Message{Role: "assistant", Content: &emptyMessage}}},
+			Choices: []schema.Choice{{Delta: &schema.Message{Role: "assistant", Content: &textContentToReturn}}},
 			Object:  "chat.completion.chunk",
 		}
 		responses <- initialMessage
@@ -67,8 +66,11 @@ func ChatEndpoint(cl *config.BackendConfigLoader, ml *model.ModelLoader, startup
 			return true
 		})
 
-		results := functions.ParseFunctionCall(result, config.FunctionsConfig)
-		noActionToRun := len(results) > 0 && results[0].Name == noAction || len(results) == 0
+		textContentToReturn = functions.ParseTextContent(result, config.FunctionsConfig)
+		result = functions.CleanupLLMResult(result, config.FunctionsConfig)
+		functionResults := functions.ParseFunctionCall(result, config.FunctionsConfig)
+		log.Debug().Msgf("Text content to return: %s", textContentToReturn)
+		noActionToRun := len(functionResults) > 0 && functionResults[0].Name == noAction || len(functionResults) == 0
 
 		switch {
 		case noActionToRun:
@@ -76,12 +78,12 @@ func ChatEndpoint(cl *config.BackendConfigLoader, ml *model.ModelLoader, startup
 				ID:      id,
 				Created: created,
 				Model:   req.Model, // we have to return what the user sent here, due to OpenAI spec.
-				Choices: []schema.Choice{{Delta: &schema.Message{Role: "assistant", Content: &emptyMessage}}},
+				Choices: []schema.Choice{{Delta: &schema.Message{Role: "assistant", Content: &textContentToReturn}}},
 				Object:  "chat.completion.chunk",
 			}
 			responses <- initialMessage
 
-			result, err := handleQuestion(config, req, ml, startupOptions, results, prompt)
+			result, err := handleQuestion(config, req, ml, startupOptions, functionResults, result, prompt)
 			if err != nil {
 				log.Error().Err(err).Msg("error handling question")
 				return
@@ -103,7 +105,7 @@ func ChatEndpoint(cl *config.BackendConfigLoader, ml *model.ModelLoader, startup
 			responses <- resp
 
 		default:
-			for i, ss := range results {
+			for i, ss := range functionResults {
 				name, args := ss.Name, ss.Arguments
 
 				initialMessage := schema.OpenAIResponse{
@@ -134,7 +136,8 @@ func ChatEndpoint(cl *config.BackendConfigLoader, ml *model.ModelLoader, startup
 					Model:   req.Model, // we have to return what the user sent here, due to OpenAI spec.
 					Choices: []schema.Choice{{
 						Delta: &schema.Message{
-							Role: "assistant",
+							Role:    "assistant",
+							Content: &textContentToReturn,
 							ToolCalls: []schema.ToolCall{
 								{
 									Index: i,
@@ -155,7 +158,11 @@ func ChatEndpoint(cl *config.BackendConfigLoader, ml *model.ModelLoader, startup
 	}
 
 	return func(c *fiber.Ctx) error {
-		modelFile, input, err := readRequest(c, ml, startupOptions, true)
+		textContentToReturn = ""
+		id = uuid.New().String()
+		created = int(time.Now().Unix())
+
+		modelFile, input, err := readRequest(c, cl, ml, startupOptions, true)
 		if err != nil {
 			return fmt.Errorf("failed reading parameters from request:%w", err)
 		}
@@ -168,6 +175,14 @@ func ChatEndpoint(cl *config.BackendConfigLoader, ml *model.ModelLoader, startup
 
 		funcs := input.Functions
 		shouldUseFn := len(input.Functions) > 0 && config.ShouldUseFunctions()
+		strictMode := false
+
+		for _, f := range input.Functions {
+			if f.Strict {
+				strictMode = true
+				break
+			}
+		}
 
 		// Allow the user to set custom actions via config file
 		// to be "embedded" in each model
@@ -181,8 +196,36 @@ func ChatEndpoint(cl *config.BackendConfigLoader, ml *model.ModelLoader, startup
 			noActionDescription = config.FunctionsConfig.NoActionDescriptionName
 		}
 
-		if input.ResponseFormat.Type == "json_object" {
-			input.Grammar = functions.JSONBNF
+		if config.ResponseFormatMap != nil {
+			d := schema.ChatCompletionResponseFormat{}
+			dat, err := json.Marshal(config.ResponseFormatMap)
+			if err != nil {
+				return err
+			}
+			err = json.Unmarshal(dat, &d)
+			if err != nil {
+				return err
+			}
+			if d.Type == "json_object" {
+				input.Grammar = functions.JSONBNF
+			} else if d.Type == "json_schema" {
+				d := schema.JsonSchemaRequest{}
+				dat, err := json.Marshal(config.ResponseFormatMap)
+				if err != nil {
+					return err
+				}
+				err = json.Unmarshal(dat, &d)
+				if err != nil {
+					return err
+				}
+				fs := &functions.JSONFunctionStructure{
+					AnyOf: []functions.Item{d.JsonSchema.Schema},
+				}
+				g, err := fs.Grammar(config.FunctionsConfig.GrammarOptions()...)
+				if err == nil {
+					input.Grammar = g
+				}
+			}
 		}
 
 		config.Grammar = input.Grammar
@@ -192,7 +235,7 @@ func ChatEndpoint(cl *config.BackendConfigLoader, ml *model.ModelLoader, startup
 		}
 
 		switch {
-		case !config.FunctionsConfig.NoGrammar && shouldUseFn:
+		case (!config.FunctionsConfig.GrammarConfig.NoGrammar || strictMode) && shouldUseFn:
 			noActionGrammar := functions.Function{
 				Name:        noActionName,
 				Description: noActionDescription,
@@ -216,10 +259,16 @@ func ChatEndpoint(cl *config.BackendConfigLoader, ml *model.ModelLoader, startup
 			}
 
 			// Update input grammar
-			jsStruct := funcs.ToJSONStructure()
-			config.Grammar = jsStruct.Grammar("", config.FunctionsConfig.ParallelCalls)
+			jsStruct := funcs.ToJSONStructure(config.FunctionsConfig.FunctionNameKey, config.FunctionsConfig.FunctionNameKey)
+			g, err := jsStruct.Grammar(config.FunctionsConfig.GrammarOptions()...)
+			if err == nil {
+				config.Grammar = g
+			}
 		case input.JSONFunctionGrammarObject != nil:
-			config.Grammar = input.JSONFunctionGrammarObject.Grammar("", config.FunctionsConfig.ParallelCalls)
+			g, err := input.JSONFunctionGrammarObject.Grammar(config.FunctionsConfig.GrammarOptions()...)
+			if err == nil {
+				config.Grammar = g
+			}
 		default:
 			// Force picking one of the functions by the request
 			if config.FunctionToCall() != "" {
@@ -341,7 +390,12 @@ func ChatEndpoint(cl *config.BackendConfigLoader, ml *model.ModelLoader, startup
 				mess = append(mess, content)
 			}
 
-			predInput = strings.Join(mess, "\n")
+			joinCharacter := "\n"
+			if config.TemplateConfig.JoinChatMessagesByCharacter != nil {
+				joinCharacter = *config.TemplateConfig.JoinChatMessagesByCharacter
+			}
+
+			predInput = strings.Join(mess, joinCharacter)
 			log.Debug().Msgf("Prompt (before templating): %s", predInput)
 
 			templateFile := ""
@@ -415,7 +469,6 @@ func ChatEndpoint(cl *config.BackendConfigLoader, ml *model.ModelLoader, startup
 					if err != nil {
 						log.Debug().Msgf("Sending chunk failed: %v", err)
 						input.Cancel()
-						break
 					}
 					w.Flush()
 				}
@@ -435,7 +488,7 @@ func ChatEndpoint(cl *config.BackendConfigLoader, ml *model.ModelLoader, startup
 						{
 							FinishReason: finishReason,
 							Index:        0,
-							Delta:        &schema.Message{Content: &emptyMessage},
+							Delta:        &schema.Message{Content: &textContentToReturn},
 						}},
 					Object: "chat.completion.chunk",
 					Usage:  *usage,
@@ -457,12 +510,15 @@ func ChatEndpoint(cl *config.BackendConfigLoader, ml *model.ModelLoader, startup
 					return
 				}
 
+				textContentToReturn = functions.ParseTextContent(s, config.FunctionsConfig)
+				s = functions.CleanupLLMResult(s, config.FunctionsConfig)
 				results := functions.ParseFunctionCall(s, config.FunctionsConfig)
+				log.Debug().Msgf("Text content to return: %s", textContentToReturn)
 				noActionsToRun := len(results) > 0 && results[0].Name == noActionName || len(results) == 0
 
 				switch {
 				case noActionsToRun:
-					result, err := handleQuestion(config, input, ml, startupOptions, results, predInput)
+					result, err := handleQuestion(config, input, ml, startupOptions, results, s, predInput)
 					if err != nil {
 						log.Error().Err(err).Msg("error handling question")
 						return
@@ -485,6 +541,7 @@ func ChatEndpoint(cl *config.BackendConfigLoader, ml *model.ModelLoader, startup
 						if len(input.Tools) > 0 {
 							// If we are using tools, we condense the function calls into
 							// a single response choice with all the tools
+							toolChoice.Message.Content = textContentToReturn
 							toolChoice.Message.ToolCalls = append(toolChoice.Message.ToolCalls,
 								schema.ToolCall{
 									ID:   id,
@@ -500,7 +557,8 @@ func ChatEndpoint(cl *config.BackendConfigLoader, ml *model.ModelLoader, startup
 							*c = append(*c, schema.Choice{
 								FinishReason: "function_call",
 								Message: &schema.Message{
-									Role: "assistant",
+									Role:    "assistant",
+									Content: &textContentToReturn,
 									FunctionCall: map[string]interface{}{
 										"name":      name,
 										"arguments": args,
@@ -542,7 +600,14 @@ func ChatEndpoint(cl *config.BackendConfigLoader, ml *model.ModelLoader, startup
 	}
 }
 
-func handleQuestion(config *config.BackendConfig, input *schema.OpenAIRequest, ml *model.ModelLoader, o *config.ApplicationConfig, funcResults []functions.FuncCallResults, prompt string) (string, error) {
+func handleQuestion(config *config.BackendConfig, input *schema.OpenAIRequest, ml *model.ModelLoader, o *config.ApplicationConfig, funcResults []functions.FuncCallResults, result, prompt string) (string, error) {
+
+	if len(funcResults) == 0 && result != "" {
+		log.Debug().Msgf("nothing function results but we had a message from the LLM")
+
+		return result, nil
+	}
+
 	log.Debug().Msgf("nothing to do, computing a reply")
 	arg := ""
 	if len(funcResults) > 0 {
@@ -575,8 +640,16 @@ func handleQuestion(config *config.BackendConfig, input *schema.OpenAIRequest, m
 	for _, m := range input.Messages {
 		images = append(images, m.StringImages...)
 	}
+	videos := []string{}
+	for _, m := range input.Messages {
+		videos = append(videos, m.StringVideos...)
+	}
+	audios := []string{}
+	for _, m := range input.Messages {
+		audios = append(audios, m.StringAudios...)
+	}
 
-	predFunc, err := backend.ModelInference(input.Context, prompt, input.Messages, images, ml, *config, o, nil)
+	predFunc, err := backend.ModelInference(input.Context, prompt, input.Messages, images, videos, audios, ml, *config, o, nil)
 	if err != nil {
 		log.Error().Err(err).Msg("model inference failed")
 		return "", err

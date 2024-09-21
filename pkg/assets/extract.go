@@ -6,7 +6,13 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+
+	"github.com/mudler/LocalAI/pkg/library"
 )
+
+func ResolvePath(dir string, paths ...string) string {
+	return filepath.Join(append([]string{dir, "backend-assets"}, paths...)...)
+}
 
 func ExtractFiles(content embed.FS, extractDir string) error {
 	// Create the target directory if it doesn't exist
@@ -39,13 +45,18 @@ func ExtractFiles(content embed.FS, extractDir string) error {
 		}
 
 		// Create the file in the target directory
-		err = os.WriteFile(targetFile, fileData, 0600)
+		err = os.WriteFile(targetFile, fileData, 0700)
 		if err != nil {
 			return fmt.Errorf("failed to write file: %v", err)
 		}
 
 		return nil
 	})
+
+	// If there is a lib directory, set LD_LIBRARY_PATH to include it
+	// we might use this mechanism to carry over e.g. Nvidia CUDA libraries
+	// from the embedded FS to the target directory
+	library.LoadExtractedLibs(extractDir)
 
 	return err
 }

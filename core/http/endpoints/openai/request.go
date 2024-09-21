@@ -2,23 +2,20 @@ package openai
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
-	"strings"
 
-	"github.com/go-skynet/LocalAI/core/config"
-	fiberContext "github.com/go-skynet/LocalAI/core/http/ctx"
-	"github.com/go-skynet/LocalAI/core/schema"
-	"github.com/go-skynet/LocalAI/pkg/functions"
-	model "github.com/go-skynet/LocalAI/pkg/model"
 	"github.com/gofiber/fiber/v2"
+	"github.com/mudler/LocalAI/core/config"
+	fiberContext "github.com/mudler/LocalAI/core/http/ctx"
+	"github.com/mudler/LocalAI/core/schema"
+	"github.com/mudler/LocalAI/pkg/functions"
+	"github.com/mudler/LocalAI/pkg/model"
+	"github.com/mudler/LocalAI/pkg/utils"
 	"github.com/rs/zerolog/log"
 )
 
-func readRequest(c *fiber.Ctx, ml *model.ModelLoader, o *config.ApplicationConfig, firstModel bool) (string, *schema.OpenAIRequest, error) {
+func readRequest(c *fiber.Ctx, cl *config.BackendConfigLoader, ml *model.ModelLoader, o *config.ApplicationConfig, firstModel bool) (string, *schema.OpenAIRequest, error) {
 	input := new(schema.OpenAIRequest)
 
 	// Get input data from the request body
@@ -34,40 +31,9 @@ func readRequest(c *fiber.Ctx, ml *model.ModelLoader, o *config.ApplicationConfi
 
 	log.Debug().Msgf("Request received: %s", string(received))
 
-	modelFile, err := fiberContext.ModelFromContext(c, ml, input.Model, firstModel)
+	modelFile, err := fiberContext.ModelFromContext(c, cl, ml, input.Model, firstModel)
 
 	return modelFile, input, err
-}
-
-// this function check if the string is an URL, if it's an URL downloads the image in memory
-// encodes it in base64 and returns the base64 string
-func getBase64Image(s string) (string, error) {
-	if strings.HasPrefix(s, "http") {
-		// download the image
-		resp, err := http.Get(s)
-		if err != nil {
-			return "", err
-		}
-		defer resp.Body.Close()
-
-		// read the image data into memory
-		data, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return "", err
-		}
-
-		// encode the image data in base64
-		encoded := base64.StdEncoding.EncodeToString(data)
-
-		// return the base64 string
-		return encoded, nil
-	}
-
-	// if the string instead is prefixed with "data:image/jpeg;base64,", drop it
-	if strings.HasPrefix(s, "data:image/jpeg;base64,") {
-		return strings.ReplaceAll(s, "data:image/jpeg;base64,", ""), nil
-	}
-	return "", fmt.Errorf("not valid string")
 }
 
 func updateRequestConfig(config *config.BackendConfig, input *schema.OpenAIRequest) {
@@ -125,6 +91,15 @@ func updateRequestConfig(config *config.BackendConfig, input *schema.OpenAIReque
 		config.Maxtokens = input.Maxtokens
 	}
 
+	if input.ResponseFormat != nil {
+		switch responseFormat := input.ResponseFormat.(type) {
+		case string:
+			config.ResponseFormat = responseFormat
+		case map[string]interface{}:
+			config.ResponseFormatMap = responseFormat
+		}
+	}
+
 	switch stop := input.Stop.(type) {
 	case string:
 		if stop != "" {
@@ -160,7 +135,7 @@ func updateRequestConfig(config *config.BackendConfig, input *schema.OpenAIReque
 	}
 
 	// Decode each request's message content
-	index := 0
+	imgIndex, vidIndex, audioIndex := 0, 0, 0
 	for i, m := range input.Messages {
 		switch content := m.Content.(type) {
 		case string:
@@ -169,20 +144,44 @@ func updateRequestConfig(config *config.BackendConfig, input *schema.OpenAIReque
 			dat, _ := json.Marshal(content)
 			c := []schema.Content{}
 			json.Unmarshal(dat, &c)
+		CONTENT:
 			for _, pp := range c {
-				if pp.Type == "text" {
+				switch pp.Type {
+				case "text":
 					input.Messages[i].StringContent = pp.Text
-				} else if pp.Type == "image_url" {
-					// Detect if pp.ImageURL is an URL, if it is download the image and encode it in base64:
-					base64, err := getBase64Image(pp.ImageURL.URL)
-					if err == nil {
-						input.Messages[i].StringImages = append(input.Messages[i].StringImages, base64) // TODO: make sure that we only return base64 stuff
-						// set a placeholder for each image
-						input.Messages[i].StringContent = fmt.Sprintf("[img-%d]", index) + input.Messages[i].StringContent
-						index++
-					} else {
-						fmt.Print("Failed encoding image", err)
+				case "video", "video_url":
+					// Decode content as base64 either if it's an URL or base64 text
+					base64, err := utils.GetContentURIAsBase64(pp.VideoURL.URL)
+					if err != nil {
+						log.Error().Msgf("Failed encoding video: %s", err)
+						continue CONTENT
 					}
+					input.Messages[i].StringVideos = append(input.Messages[i].StringVideos, base64) // TODO: make sure that we only return base64 stuff
+					// set a placeholder for each image
+					input.Messages[i].StringContent = fmt.Sprintf("[vid-%d]", vidIndex) + input.Messages[i].StringContent
+					vidIndex++
+				case "audio_url", "audio":
+					// Decode content as base64 either if it's an URL or base64 text
+					base64, err := utils.GetContentURIAsBase64(pp.AudioURL.URL)
+					if err != nil {
+						log.Error().Msgf("Failed encoding image: %s", err)
+						continue CONTENT
+					}
+					input.Messages[i].StringAudios = append(input.Messages[i].StringAudios, base64) // TODO: make sure that we only return base64 stuff
+					// set a placeholder for each image
+					input.Messages[i].StringContent = fmt.Sprintf("[audio-%d]", audioIndex) + input.Messages[i].StringContent
+					audioIndex++
+				case "image_url", "image":
+					// Decode content as base64 either if it's an URL or base64 text
+					base64, err := utils.GetContentURIAsBase64(pp.ImageURL.URL)
+					if err != nil {
+						log.Error().Msgf("Failed encoding image: %s", err)
+						continue CONTENT
+					}
+					input.Messages[i].StringImages = append(input.Messages[i].StringImages, base64) // TODO: make sure that we only return base64 stuff
+					// set a placeholder for each image
+					input.Messages[i].StringContent = fmt.Sprintf("[img-%d]", imgIndex) + input.Messages[i].StringContent
+					imgIndex++
 				}
 			}
 		}
@@ -276,10 +275,15 @@ func mergeRequestWithConfig(modelFile string, input *schema.OpenAIRequest, cm *c
 		config.LoadOptionThreads(threads),
 		config.LoadOptionContextSize(ctx),
 		config.LoadOptionF16(f16),
+		config.ModelPath(loader.ModelPath),
 	)
 
 	// Set the parameters for the language model prediction
 	updateRequestConfig(cfg, input)
+
+	if !cfg.Validate() {
+		return nil, nil, fmt.Errorf("failed to validate config")
+	}
 
 	return cfg, input, err
 }

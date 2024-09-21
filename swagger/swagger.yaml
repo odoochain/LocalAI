@@ -1,11 +1,10 @@
 basePath: /
 definitions:
-  functions.Argument:
+  config.Gallery:
     properties:
-      properties:
-        additionalProperties: true
-        type: object
-      type:
+      name:
+        type: string
+      url:
         type: string
     type: object
   functions.Function:
@@ -17,16 +16,14 @@ definitions:
       parameters:
         additionalProperties: true
         type: object
-    type: object
-  functions.FunctionName:
-    properties:
-      const:
-        type: string
+      strict:
+        type: boolean
     type: object
   functions.Item:
     properties:
       properties:
-        $ref: '#/definitions/functions.Properties'
+        additionalProperties: true
+        type: object
       type:
         type: string
     type: object
@@ -44,19 +41,132 @@ definitions:
           $ref: '#/definitions/functions.Item'
         type: array
     type: object
-  functions.Properties:
-    properties:
-      arguments:
-        $ref: '#/definitions/functions.Argument'
-      function:
-        $ref: '#/definitions/functions.FunctionName'
-    type: object
   functions.Tool:
     properties:
       function:
         $ref: '#/definitions/functions.Function'
       type:
         type: string
+    type: object
+  gallery.File:
+    properties:
+      filename:
+        type: string
+      sha256:
+        type: string
+      uri:
+        type: string
+    type: object
+  gallery.GalleryModel:
+    properties:
+      config_file:
+        additionalProperties: true
+        description: config_file is read in the situation where URL is blank - and
+          therefore this is a base config.
+        type: object
+      description:
+        type: string
+      files:
+        description: AdditionalFiles are used to add additional files to the model
+        items:
+          $ref: '#/definitions/gallery.File'
+        type: array
+      gallery:
+        allOf:
+        - $ref: '#/definitions/config.Gallery'
+        description: Gallery is a reference to the gallery which contains the model
+      icon:
+        type: string
+      installed:
+        description: Installed is used to indicate if the model is installed or not
+        type: boolean
+      license:
+        type: string
+      name:
+        type: string
+      overrides:
+        additionalProperties: true
+        description: Overrides are used to override the configuration of the model
+          located at URL
+        type: object
+      tags:
+        items:
+          type: string
+        type: array
+      url:
+        type: string
+      urls:
+        items:
+          type: string
+        type: array
+    type: object
+  gallery.GalleryOpStatus:
+    properties:
+      deletion:
+        description: Deletion is true if the operation is a deletion
+        type: boolean
+      downloaded_size:
+        type: string
+      error: {}
+      file_name:
+        type: string
+      file_size:
+        type: string
+      gallery_model_name:
+        type: string
+      message:
+        type: string
+      processed:
+        type: boolean
+      progress:
+        type: number
+    type: object
+  localai.GalleryModel:
+    properties:
+      config_file:
+        additionalProperties: true
+        description: config_file is read in the situation where URL is blank - and
+          therefore this is a base config.
+        type: object
+      config_url:
+        type: string
+      description:
+        type: string
+      files:
+        description: AdditionalFiles are used to add additional files to the model
+        items:
+          $ref: '#/definitions/gallery.File'
+        type: array
+      gallery:
+        allOf:
+        - $ref: '#/definitions/config.Gallery'
+        description: Gallery is a reference to the gallery which contains the model
+      icon:
+        type: string
+      id:
+        type: string
+      installed:
+        description: Installed is used to indicate if the model is installed or not
+        type: boolean
+      license:
+        type: string
+      name:
+        type: string
+      overrides:
+        additionalProperties: true
+        description: Overrides are used to override the configuration of the model
+          located at URL
+        type: object
+      tags:
+        items:
+          type: string
+        type: array
+      url:
+        type: string
+      urls:
+        items:
+          type: string
+        type: array
     type: object
   openai.Assistant:
     properties:
@@ -120,6 +230,15 @@ definitions:
           $ref: '#/definitions/openai.Tool'
         type: array
     type: object
+  openai.DeleteStatus:
+    properties:
+      deleted:
+        type: boolean
+      id:
+        type: string
+      object:
+        type: string
+    type: object
   openai.Tool:
     properties:
       type:
@@ -135,9 +254,50 @@ definitions:
     - CodeInterpreter
     - Retrieval
     - Function
-  schema.ChatCompletionResponseFormat:
+  p2p.NodeData:
     properties:
-      type:
+      id:
+        type: string
+      lastSeen:
+        type: string
+      name:
+        type: string
+      serviceID:
+        type: string
+      tunnelAddress:
+        type: string
+    type: object
+  proto.MemoryUsageData:
+    properties:
+      breakdown:
+        additionalProperties:
+          type: integer
+        type: object
+      total:
+        type: integer
+    type: object
+  proto.StatusResponse:
+    properties:
+      memory:
+        $ref: '#/definitions/proto.MemoryUsageData'
+      state:
+        $ref: '#/definitions/proto.StatusResponse_State'
+    type: object
+  proto.StatusResponse_State:
+    enum:
+    - 0
+    - 1
+    - 2
+    - -1
+    type: integer
+    x-enum-varnames:
+    - StatusResponse_UNINITIALIZED
+    - StatusResponse_BUSY
+    - StatusResponse_READY
+    - StatusResponse_ERROR
+  schema.BackendMonitorRequest:
+    properties:
+      model:
         type: string
     type: object
   schema.Choice:
@@ -153,11 +313,62 @@ definitions:
       text:
         type: string
     type: object
+  schema.DeleteAssistantResponse:
+    properties:
+      deleted:
+        type: boolean
+      id:
+        type: string
+      object:
+        type: string
+    type: object
+  schema.ElevenLabsSoundGenerationRequest:
+    properties:
+      do_sample:
+        type: boolean
+      duration_seconds:
+        type: number
+      model_id:
+        type: string
+      prompt_influence:
+        type: number
+      text:
+        type: string
+    type: object
+  schema.File:
+    properties:
+      bytes:
+        description: Size of the file in bytes
+        type: integer
+      created_at:
+        description: The time at which the file was created
+        type: string
+      filename:
+        description: The name of the file
+        type: string
+      id:
+        description: Unique identifier for the file
+        type: string
+      object:
+        description: Type of the object (e.g., "file")
+        type: string
+      purpose:
+        description: The purpose of the file (e.g., "fine-tune", "classifications",
+          etc.)
+        type: string
+    type: object
   schema.FunctionCall:
     properties:
       arguments:
         type: string
       name:
+        type: string
+    type: object
+  schema.GalleryResponse:
+    properties:
+      status:
+        type: string
+      uuid:
         type: string
     type: object
   schema.Item:
@@ -176,6 +387,60 @@ definitions:
         description: Images
         type: string
     type: object
+  schema.JINADocumentResult:
+    properties:
+      document:
+        $ref: '#/definitions/schema.JINAText'
+      index:
+        type: integer
+      relevance_score:
+        type: number
+    type: object
+  schema.JINARerankRequest:
+    properties:
+      documents:
+        items:
+          type: string
+        type: array
+      model:
+        type: string
+      query:
+        type: string
+      top_n:
+        type: integer
+    type: object
+  schema.JINARerankResponse:
+    properties:
+      model:
+        type: string
+      results:
+        items:
+          $ref: '#/definitions/schema.JINADocumentResult'
+        type: array
+      usage:
+        $ref: '#/definitions/schema.JINAUsageInfo'
+    type: object
+  schema.JINAText:
+    properties:
+      text:
+        type: string
+    type: object
+  schema.JINAUsageInfo:
+    properties:
+      prompt_tokens:
+        type: integer
+      total_tokens:
+        type: integer
+    type: object
+  schema.ListFiles:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/schema.File'
+        type: array
+      object:
+        type: string
+    type: object
   schema.Message:
     properties:
       content:
@@ -188,9 +453,17 @@ definitions:
       role:
         description: The message role
         type: string
+      string_audios:
+        items:
+          type: string
+        type: array
       string_content:
         type: string
       string_images:
+        items:
+          type: string
+        type: array
+      string_videos:
         items:
           type: string
         type: array
@@ -198,6 +471,22 @@ definitions:
         items:
           $ref: '#/definitions/schema.ToolCall'
         type: array
+    type: object
+  schema.ModelsDataResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/schema.OpenAIModel'
+        type: array
+      object:
+        type: string
+    type: object
+  schema.OpenAIModel:
+    properties:
+      id:
+        type: string
+      object:
+        type: string
     type: object
   schema.OpenAIRequest:
     properties:
@@ -267,11 +556,11 @@ definitions:
         type: number
       prompt:
         description: Prompt is read only by completion/image API calls
+      repeat_last_n:
+        type: integer
       repeat_penalty:
         type: number
       response_format:
-        allOf:
-        - $ref: '#/definitions/schema.ChatCompletionResponseFormat'
         description: whisper/image
       rope_freq_base:
         type: number
@@ -305,6 +594,9 @@ definitions:
         description: Common options between all the API calls, part of the OpenAI
           spec
         type: number
+      translate:
+        description: Only for audio transcription
+        type: boolean
       typical_p:
         type: number
       use_fast_tokenizer:
@@ -343,15 +635,40 @@ definitions:
       total_tokens:
         type: integer
     type: object
+  schema.P2PNodesResponse:
+    properties:
+      federated_nodes:
+        items:
+          $ref: '#/definitions/p2p.NodeData'
+        type: array
+      nodes:
+        items:
+          $ref: '#/definitions/p2p.NodeData'
+        type: array
+    type: object
+  schema.SystemInformationResponse:
+    properties:
+      backends:
+        items:
+          type: string
+        type: array
+    type: object
   schema.TTSRequest:
+    description: TTS request body
     properties:
       backend:
         type: string
       input:
+        description: text input
+        type: string
+      language:
+        description: (optional) language to use with TTS model
         type: string
       model:
+        description: model name or full path
         type: string
       voice:
+        description: voice audio file or speaker id
         type: string
     type: object
   schema.ToolCall:
@@ -376,7 +693,214 @@ info:
   title: LocalAI API
   version: 2.0.0
 paths:
+  /api/p2p:
+    get:
+      responses:
+        "200":
+          description: Response
+          schema:
+            items:
+              $ref: '#/definitions/schema.P2PNodesResponse'
+            type: array
+      summary: Returns available P2P nodes
+  /api/p2p/token:
+    get:
+      responses:
+        "200":
+          description: Response
+          schema:
+            type: string
+      summary: Show the P2P token
+  /backend/monitor:
+    get:
+      parameters:
+      - description: Backend statistics request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/schema.BackendMonitorRequest'
+      responses:
+        "200":
+          description: Response
+          schema:
+            $ref: '#/definitions/proto.StatusResponse'
+      summary: Backend monitor endpoint
+  /backend/shutdown:
+    post:
+      parameters:
+      - description: Backend statistics request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/schema.BackendMonitorRequest'
+      responses: {}
+      summary: Backend monitor endpoint
+  /metrics:
+    get:
+      parameters:
+      - description: Gallery details
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/config.Gallery'
+      responses: {}
+      summary: Prometheus metrics endpoint
+  /models/apply:
+    post:
+      parameters:
+      - description: query params
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/localai.GalleryModel'
+      responses:
+        "200":
+          description: Response
+          schema:
+            $ref: '#/definitions/schema.GalleryResponse'
+      summary: Install models to LocalAI.
+  /models/available:
+    get:
+      responses:
+        "200":
+          description: Response
+          schema:
+            items:
+              $ref: '#/definitions/gallery.GalleryModel'
+            type: array
+      summary: List installable models.
+  /models/delete/{name}:
+    post:
+      parameters:
+      - description: Model name
+        in: path
+        name: name
+        required: true
+        type: string
+      responses:
+        "200":
+          description: Response
+          schema:
+            $ref: '#/definitions/schema.GalleryResponse'
+      summary: delete models to LocalAI.
+  /models/galleries:
+    delete:
+      parameters:
+      - description: Gallery details
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/config.Gallery'
+      responses:
+        "200":
+          description: Response
+          schema:
+            items:
+              $ref: '#/definitions/config.Gallery'
+            type: array
+      summary: removes a gallery from LocalAI
+    get:
+      responses:
+        "200":
+          description: Response
+          schema:
+            items:
+              $ref: '#/definitions/config.Gallery'
+            type: array
+      summary: List all Galleries
+    post:
+      parameters:
+      - description: Gallery details
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/config.Gallery'
+      responses:
+        "200":
+          description: Response
+          schema:
+            items:
+              $ref: '#/definitions/config.Gallery'
+            type: array
+      summary: Adds a gallery in LocalAI
+  /models/jobs:
+    get:
+      responses:
+        "200":
+          description: Response
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/gallery.GalleryOpStatus'
+            type: object
+      summary: Returns all the jobs status progress
+  /models/jobs/{uuid}:
+    get:
+      responses:
+        "200":
+          description: Response
+          schema:
+            $ref: '#/definitions/gallery.GalleryOpStatus'
+      summary: Returns the job status
+  /system:
+    get:
+      responses:
+        "200":
+          description: Response
+          schema:
+            $ref: '#/definitions/schema.SystemInformationResponse'
+      summary: Show the LocalAI instance information
+  /tts:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: query params
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/schema.TTSRequest'
+      produces:
+      - audio/x-wav
+      responses:
+        "200":
+          description: generated audio/wav file
+          schema:
+            type: string
+      summary: Generates audio from the input text.
   /v1/assistants:
+    get:
+      parameters:
+      - description: Limit the number of assistants returned
+        in: query
+        name: limit
+        type: integer
+      - description: Order of assistants returned
+        in: query
+        name: order
+        type: string
+      - description: Return assistants created after the given ID
+        in: query
+        name: after
+        type: string
+      - description: Return assistants created before the given ID
+        in: query
+        name: before
+        type: string
+      responses:
+        "200":
+          description: Response
+          schema:
+            items:
+              $ref: '#/definitions/openai.Assistant'
+            type: array
+      summary: List available assistents
     post:
       parameters:
       - description: query params
@@ -391,8 +915,25 @@ paths:
           schema:
             $ref: '#/definitions/openai.Assistant'
       summary: Create an assistant with a model and instructions.
+  /v1/assistants/{assistant_id}:
+    delete:
+      responses:
+        "200":
+          description: Response
+          schema:
+            $ref: '#/definitions/schema.DeleteAssistantResponse'
+      summary: Delete assistents
+    get:
+      responses:
+        "200":
+          description: Response
+          schema:
+            $ref: '#/definitions/openai.Assistant'
+      summary: Get assistent data
   /v1/audio/speech:
     post:
+      consumes:
+      - application/json
       parameters:
       - description: query params
         in: body
@@ -400,9 +941,11 @@ paths:
         required: true
         schema:
           $ref: '#/definitions/schema.TTSRequest'
+      produces:
+      - audio/x-wav
       responses:
         "200":
-          description: Response
+          description: generated audio/wav file
           schema:
             type: string
       summary: Generates audio from the input text.
@@ -459,6 +1002,21 @@ paths:
           schema:
             $ref: '#/definitions/schema.OpenAIResponse'
       summary: Generate completions for a given prompt and model.
+  /v1/edits:
+    post:
+      parameters:
+      - description: query params
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/schema.OpenAIRequest'
+      responses:
+        "200":
+          description: Response
+          schema:
+            $ref: '#/definitions/schema.OpenAIResponse'
+      summary: OpenAI edit endpoint
   /v1/embeddings:
     post:
       parameters:
@@ -475,6 +1033,37 @@ paths:
             $ref: '#/definitions/schema.OpenAIResponse'
       summary: Get a vector representation of a given input that can be easily consumed
         by machine learning models and algorithms.
+  /v1/files:
+    get:
+      responses:
+        "200":
+          description: Response
+          schema:
+            $ref: '#/definitions/schema.ListFiles'
+      summary: List files.
+  /v1/files/{file_id}:
+    delete:
+      responses:
+        "200":
+          description: Response
+          schema:
+            $ref: '#/definitions/openai.DeleteStatus'
+      summary: Delete a file.
+    get:
+      responses:
+        "200":
+          description: Response
+          schema:
+            $ref: '#/definitions/schema.File'
+      summary: Returns information about a specific file.
+  /v1/files/{file_id}/content:
+    get:
+      responses:
+        "200":
+          description: file
+          schema:
+            type: string
+      summary: Returns information about a specific file.
   /v1/images/generations:
     post:
       parameters:
@@ -490,6 +1079,44 @@ paths:
           schema:
             $ref: '#/definitions/schema.OpenAIResponse'
       summary: Creates an image given a prompt.
+  /v1/models:
+    get:
+      responses:
+        "200":
+          description: Response
+          schema:
+            $ref: '#/definitions/schema.ModelsDataResponse'
+      summary: List and describe the various models available in the API.
+  /v1/rerank:
+    post:
+      parameters:
+      - description: query params
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/schema.JINARerankRequest'
+      responses:
+        "200":
+          description: Response
+          schema:
+            $ref: '#/definitions/schema.JINARerankResponse'
+      summary: Reranks a list of phrases by relevance to a given text query.
+  /v1/sound-generation:
+    post:
+      parameters:
+      - description: query params
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/schema.ElevenLabsSoundGenerationRequest'
+      responses:
+        "200":
+          description: Response
+          schema:
+            type: string
+      summary: Generates audio from the input text.
   /v1/text-to-speech/{voice-id}:
     post:
       parameters:

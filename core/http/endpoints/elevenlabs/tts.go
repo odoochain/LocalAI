@@ -1,13 +1,13 @@
 package elevenlabs
 
 import (
-	"github.com/go-skynet/LocalAI/core/backend"
-	"github.com/go-skynet/LocalAI/core/config"
-	fiberContext "github.com/go-skynet/LocalAI/core/http/ctx"
-	"github.com/go-skynet/LocalAI/pkg/model"
+	"github.com/mudler/LocalAI/core/backend"
+	"github.com/mudler/LocalAI/core/config"
+	fiberContext "github.com/mudler/LocalAI/core/http/ctx"
+	"github.com/mudler/LocalAI/pkg/model"
 
-	"github.com/go-skynet/LocalAI/core/schema"
 	"github.com/gofiber/fiber/v2"
+	"github.com/mudler/LocalAI/core/schema"
 	"github.com/rs/zerolog/log"
 )
 
@@ -28,7 +28,7 @@ func TTSEndpoint(cl *config.BackendConfigLoader, ml *model.ModelLoader, appConfi
 			return err
 		}
 
-		modelFile, err := fiberContext.ModelFromContext(c, ml, input.ModelID, false)
+		modelFile, err := fiberContext.ModelFromContext(c, cl, ml, input.ModelID, false)
 		if err != nil {
 			modelFile = input.ModelID
 			log.Warn().Msgf("Model not found in context: %s", input.ModelID)
@@ -52,7 +52,7 @@ func TTSEndpoint(cl *config.BackendConfigLoader, ml *model.ModelLoader, appConfi
 		}
 		log.Debug().Msgf("Request for model: %s", modelFile)
 
-		filePath, _, err := backend.ModelTTS(cfg.Backend, input.Text, modelFile, voiceID, ml, appConfig, *cfg)
+		filePath, _, err := backend.ModelTTS(cfg.Backend, input.Text, modelFile, "", voiceID, ml, appConfig, *cfg)
 		if err != nil {
 			return err
 		}

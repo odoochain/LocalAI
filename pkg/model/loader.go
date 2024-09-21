@@ -7,71 +7,32 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
-	"github.com/go-skynet/LocalAI/pkg/templates"
+	"github.com/mudler/LocalAI/pkg/templates"
 
-	"github.com/go-skynet/LocalAI/pkg/functions"
-	"github.com/go-skynet/LocalAI/pkg/grpc"
-	"github.com/go-skynet/LocalAI/pkg/utils"
+	"github.com/mudler/LocalAI/pkg/utils"
 
 	process "github.com/mudler/go-processmanager"
 	"github.com/rs/zerolog/log"
 )
 
-// Rather than pass an interface{} to the prompt template:
-// These are the definitions of all possible variables LocalAI will currently populate for use in a prompt template file
-// Please note: Not all of these are populated on every endpoint - your template should either be tested for each endpoint you map it to, or tolerant of zero values.
-type PromptTemplateData struct {
-	SystemPrompt         string
-	SuppressSystemPrompt bool // used by chat specifically to indicate that SystemPrompt above should be _ignored_
-	Input                string
-	Instruction          string
-	Functions            []functions.Function
-	MessageIndex         int
-}
-
-// TODO: Ask mudler about FunctionCall stuff being useful at the message level?
-type ChatMessageTemplateData struct {
-	SystemPrompt string
-	Role         string
-	RoleName     string
-	FunctionName string
-	Content      string
-	MessageIndex int
-	Function     bool
-	FunctionCall interface{}
-	LastMessage  bool
-}
-
 // new idea: what if we declare a struct of these here, and use a loop to check?
 
 // TODO: Split ModelLoader and TemplateLoader? Just to keep things more organized. Left together to share a mutex until I look into that. Would split if we seperate directories for .bin/.yaml and .tmpl
 type ModelLoader struct {
-	ModelPath string
-	mu        sync.Mutex
-	// TODO: this needs generics
-	grpcClients   map[string]grpc.Backend
-	models        map[string]ModelAddress
+	ModelPath     string
+	mu            sync.Mutex
+	models        map[string]*Model
 	grpcProcesses map[string]*process.Process
 	templates     *templates.TemplateCache
 	wd            *WatchDog
 }
 
-type ModelAddress string
-
-func (m ModelAddress) GRPC(parallel bool, wd *WatchDog) grpc.Backend {
-	enableWD := false
-	if wd != nil {
-		enableWD = true
-	}
-	return grpc.NewClient(string(m), parallel, wd, enableWD)
-}
-
 func NewModelLoader(modelPath string) *ModelLoader {
 	nml := &ModelLoader{
 		ModelPath:     modelPath,
-		grpcClients:   make(map[string]grpc.Backend),
-		models:        make(map[string]ModelAddress),
+		models:        make(map[string]*Model),
 		templates:     templates.NewTemplateCache(modelPath),
 		grpcProcesses: make(map[string]*process.Process),
 	}
@@ -87,22 +48,54 @@ func (ml *ModelLoader) ExistsInModelPath(s string) bool {
 	return utils.ExistsInPath(ml.ModelPath, s)
 }
 
-func (ml *ModelLoader) ListModels() ([]string, error) {
+var knownFilesToSkip []string = []string{
+	"MODEL_CARD",
+	"README",
+	"README.md",
+}
+
+var knownModelsNameSuffixToSkip []string = []string{
+	".tmpl",
+	".keep",
+	".yaml",
+	".yml",
+	".json",
+	".txt",
+	".md",
+	".MD",
+	".DS_Store",
+	".",
+	".partial",
+	".tar.gz",
+}
+
+const retryTimeout = time.Duration(2 * time.Minute)
+
+func (ml *ModelLoader) ListFilesInModelPath() ([]string, error) {
 	files, err := os.ReadDir(ml.ModelPath)
 	if err != nil {
 		return []string{}, err
 	}
 
 	models := []string{}
+FILE:
 	for _, file := range files {
-		// Skip templates, YAML, .keep, .json, and .DS_Store files - TODO: as this list grows, is there a more efficient method?
-		if strings.HasSuffix(file.Name(), ".tmpl") ||
-			strings.HasSuffix(file.Name(), ".keep") ||
-			strings.HasSuffix(file.Name(), ".yaml") ||
-			strings.HasSuffix(file.Name(), ".yml") ||
-			strings.HasSuffix(file.Name(), ".json") ||
-			strings.HasSuffix(file.Name(), ".DS_Store") ||
-			strings.HasPrefix(file.Name(), ".") {
+
+		for _, skip := range knownFilesToSkip {
+			if strings.EqualFold(file.Name(), skip) {
+				continue FILE
+			}
+		}
+
+		// Skip templates, YAML, .keep, .json, and .DS_Store files
+		for _, skip := range knownModelsNameSuffixToSkip {
+			if strings.HasSuffix(file.Name(), skip) {
+				continue FILE
+			}
+		}
+
+		// Skip directories
+		if file.IsDir() {
 			continue
 		}
 
@@ -112,12 +105,21 @@ func (ml *ModelLoader) ListModels() ([]string, error) {
 	return models, nil
 }
 
-func (ml *ModelLoader) LoadModel(modelName string, loader func(string, string) (ModelAddress, error)) (ModelAddress, error) {
+func (ml *ModelLoader) ListModels() []*Model {
 	ml.mu.Lock()
 	defer ml.mu.Unlock()
 
+	models := []*Model{}
+	for _, model := range ml.models {
+		models = append(models, model)
+	}
+
+	return models
+}
+
+func (ml *ModelLoader) LoadModel(modelName string, loader func(string, string) (*Model, error)) (*Model, error) {
 	// Check if we already have a loaded model
-	if model := ml.CheckIsLoaded(modelName); model != "" {
+	if model := ml.CheckIsLoaded(modelName); model != nil {
 		return model, nil
 	}
 
@@ -127,18 +129,17 @@ func (ml *ModelLoader) LoadModel(modelName string, loader func(string, string) (
 
 	model, err := loader(modelName, modelFile)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
-	// TODO: Add a helper method to iterate all prompt templates associated with a config if and only if it's YAML?
-	// Minor perf loss here until this is fixed, but we initialize on first request
+	if model == nil {
+		return nil, fmt.Errorf("loader didn't return a model")
+	}
 
-	// // If there is a prompt template, load it
-	// if err := ml.loadTemplateIfExists(modelName); err != nil {
-	// 	return nil, err
-	// }
-
+	ml.mu.Lock()
+	defer ml.mu.Unlock()
 	ml.models[modelName] = model
+
 	return model, nil
 }
 
@@ -146,64 +147,59 @@ func (ml *ModelLoader) ShutdownModel(modelName string) error {
 	ml.mu.Lock()
 	defer ml.mu.Unlock()
 
-	return ml.stopModel(modelName)
-}
-
-func (ml *ModelLoader) stopModel(modelName string) error {
-	defer ml.deleteProcess(modelName)
-	if _, ok := ml.models[modelName]; !ok {
+	_, ok := ml.models[modelName]
+	if !ok {
 		return fmt.Errorf("model %s not found", modelName)
 	}
-	return nil
-	//return ml.deleteProcess(modelName)
+
+	retries := 1
+	for ml.models[modelName].GRPC(false, ml.wd).IsBusy() {
+		log.Debug().Msgf("%s busy. Waiting.", modelName)
+		dur := time.Duration(retries*2) * time.Second
+		if dur > retryTimeout {
+			dur = retryTimeout
+		}
+		time.Sleep(dur)
+		retries++
+	}
+
+	return ml.deleteProcess(modelName)
 }
 
-func (ml *ModelLoader) CheckIsLoaded(s string) ModelAddress {
-	var client grpc.Backend
-	if m, ok := ml.models[s]; ok {
-		log.Debug().Msgf("Model already loaded in memory: %s", s)
-		if c, ok := ml.grpcClients[s]; ok {
-			client = c
-		} else {
-			client = m.GRPC(false, ml.wd)
+func (ml *ModelLoader) CheckIsLoaded(s string) *Model {
+	ml.mu.Lock()
+	defer ml.mu.Unlock()
+	m, ok := ml.models[s]
+	if !ok {
+		return nil
+	}
+
+	log.Debug().Msgf("Model already loaded in memory: %s", s)
+	client := m.GRPC(false, ml.wd)
+
+	log.Debug().Msgf("Checking model availability (%s)", s)
+	cTimeout, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	alive, err := client.HealthCheck(cTimeout)
+	if !alive {
+		log.Warn().Msgf("GRPC Model not responding: %s", err.Error())
+		log.Warn().Msgf("Deleting the process in order to recreate it")
+		process, exists := ml.grpcProcesses[s]
+		if !exists {
+			log.Error().Msgf("Process not found for '%s' and the model is not responding anymore !", s)
+			return m
 		}
-		alive, err := client.HealthCheck(context.Background())
-		if !alive {
-			log.Warn().Msgf("GRPC Model not responding: %s", err.Error())
-			log.Warn().Msgf("Deleting the process in order to recreate it")
-			if !ml.grpcProcesses[s].IsAlive() {
-				log.Debug().Msgf("GRPC Process is not responding: %s", s)
-				// stop and delete the process, this forces to re-load the model and re-create again the service
-				err := ml.deleteProcess(s)
-				if err != nil {
-					log.Error().Err(err).Str("process", s).Msg("error stopping process")
-				}
-				return ""
+		if !process.IsAlive() {
+			log.Debug().Msgf("GRPC Process is not responding: %s", s)
+			// stop and delete the process, this forces to re-load the model and re-create again the service
+			err := ml.deleteProcess(s)
+			if err != nil {
+				log.Error().Err(err).Str("process", s).Msg("error stopping process")
 			}
+			return nil
 		}
-
-		return m
 	}
 
-	return ""
-}
-
-const (
-	ChatPromptTemplate templates.TemplateType = iota
-	ChatMessageTemplate
-	CompletionPromptTemplate
-	EditPromptTemplate
-	FunctionsPromptTemplate
-)
-
-func (ml *ModelLoader) EvaluateTemplateForPrompt(templateType templates.TemplateType, templateName string, in PromptTemplateData) (string, error) {
-	// TODO: should this check be improved?
-	if templateType == ChatMessageTemplate {
-		return "", fmt.Errorf("invalid templateType: ChatMessage")
-	}
-	return ml.templates.EvaluateTemplate(templateType, templateName, in)
-}
-
-func (ml *ModelLoader) EvaluateTemplateForChatMessage(templateName string, messageData ChatMessageTemplateData) (string, error) {
-	return ml.templates.EvaluateTemplate(ChatMessageTemplate, templateName, messageData)
+	return m
 }

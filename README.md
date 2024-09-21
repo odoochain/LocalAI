@@ -40,47 +40,61 @@
 
 > :bulb: Get help - [❓FAQ](https://localai.io/faq/) [💭Discussions](https://github.com/go-skynet/LocalAI/discussions) [:speech_balloon: Discord](https://discord.gg/uJAeKSAGDy) [:book: Documentation website](https://localai.io/)
 >
-> [💻 Quickstart](https://localai.io/basics/getting_started/) [📣 News](https://localai.io/basics/news/) [ 🛫 Examples ](https://github.com/go-skynet/LocalAI/tree/master/examples/) [ 🖼️ Models ](https://localai.io/models/) [ 🚀 Roadmap ](https://github.com/mudler/LocalAI/issues?q=is%3Aissue+is%3Aopen+label%3Aroadmap)
+> [💻 Quickstart](https://localai.io/basics/getting_started/) [🖼️ Models](https://models.localai.io/) [🚀 Roadmap](https://github.com/mudler/LocalAI/issues?q=is%3Aissue+is%3Aopen+label%3Aroadmap) [🥽 Demo](https://demo.localai.io) [🌍 Explorer](https://explorer.localai.io) [🛫 Examples](https://github.com/go-skynet/LocalAI/tree/master/examples/) 
 
 [![tests](https://github.com/go-skynet/LocalAI/actions/workflows/test.yml/badge.svg)](https://github.com/go-skynet/LocalAI/actions/workflows/test.yml)[![Build and Release](https://github.com/go-skynet/LocalAI/actions/workflows/release.yaml/badge.svg)](https://github.com/go-skynet/LocalAI/actions/workflows/release.yaml)[![build container images](https://github.com/go-skynet/LocalAI/actions/workflows/image.yml/badge.svg)](https://github.com/go-skynet/LocalAI/actions/workflows/image.yml)[![Bump dependencies](https://github.com/go-skynet/LocalAI/actions/workflows/bump_deps.yaml/badge.svg)](https://github.com/go-skynet/LocalAI/actions/workflows/bump_deps.yaml)[![Artifact Hub](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/localai)](https://artifacthub.io/packages/search?repo=localai)
 
 **LocalAI** is the free, Open Source OpenAI alternative. LocalAI act as a drop-in replacement REST API that’s compatible with OpenAI (Elevenlabs, Anthropic... ) API specifications for local AI inferencing. It allows you to run LLMs, generate images, audio (and not only) locally or on-prem with consumer grade hardware, supporting multiple model families. Does not require GPU. It is created and maintained by [Ettore Di Giacinto](https://github.com/mudler).
 
+![screen](https://github.com/mudler/LocalAI/assets/2420543/20b5ccd2-8393-44f0-aaf6-87a23806381e)
+
+Run the installer script:
+
+```bash
+curl https://localai.io/install.sh | sh
+```
+
+Or run with docker:
+```bash
+docker run -ti --name local-ai -p 8080:8080 localai/localai:latest-aio-cpu
+# Alternative images:
+# - if you have an Nvidia GPU:
+# docker run -ti --name local-ai -p 8080:8080 --gpus all localai/localai:latest-aio-gpu-nvidia-cuda-12
+# - without preconfigured models
+# docker run -ti --name local-ai -p 8080:8080 localai/localai:latest
+# - without preconfigured models for Nvidia GPUs
+# docker run -ti --name local-ai -p 8080:8080 --gpus all localai/localai:latest-gpu-nvidia-cuda-12 
+```
+
+[💻 Getting started](https://localai.io/basics/getting_started/index.html)
+
 ## 🔥🔥 Hot topics / Roadmap
 
 [Roadmap](https://github.com/mudler/LocalAI/issues?q=is%3Aissue+is%3Aopen+label%3Aroadmap)
 
-- Chat, TTS, and Image generation in the WebUI: https://github.com/mudler/LocalAI/pull/2222
-- Reranker API: https://github.com/mudler/LocalAI/pull/2121
-- Gallery WebUI: https://github.com/mudler/LocalAI/pull/2104
-- llama3: https://github.com/mudler/LocalAI/discussions/2076
-- Parler-TTS: https://github.com/mudler/LocalAI/pull/2027
-- Openvino support: https://github.com/mudler/LocalAI/pull/1892
-- Vector store: https://github.com/mudler/LocalAI/pull/1795
-- All-in-one container image: https://github.com/mudler/LocalAI/issues/1855
+- Aug 2024:  🆕 FLUX-1, [P2P Explorer](https://explorer.localai.io)
+- July 2024: 🔥🔥 🆕 P2P Dashboard, LocalAI Federated mode and AI Swarms: https://github.com/mudler/LocalAI/pull/2723
+- June 2024: 🆕 You can browse now the model gallery without LocalAI! Check out https://models.localai.io
+- June 2024: Support for models from OCI registries: https://github.com/mudler/LocalAI/pull/2628
+- May 2024: 🔥🔥 Decentralized P2P llama.cpp:  https://github.com/mudler/LocalAI/pull/2343 (peer2peer llama.cpp!) 👉 Docs  https://localai.io/features/distribute/
+- May 2024: 🔥🔥 Openvoice: https://github.com/mudler/LocalAI/pull/2334
+- May 2024: 🆕 Function calls without grammars and mixed mode: https://github.com/mudler/LocalAI/pull/2328
+- May 2024: 🔥🔥 Distributed inferencing: https://github.com/mudler/LocalAI/pull/2324
+- May 2024: Chat, TTS, and Image generation in the WebUI: https://github.com/mudler/LocalAI/pull/2222
+- April 2024: Reranker API: https://github.com/mudler/LocalAI/pull/2121
 
 Hot topics (looking for contributors):
 
+- 🔥🔥 Distributed, P2P Global community pools: https://github.com/mudler/LocalAI/issues/3113
 - WebUI improvements: https://github.com/mudler/LocalAI/issues/2156
 - Backends v2: https://github.com/mudler/LocalAI/issues/1126
 - Improving UX v2: https://github.com/mudler/LocalAI/issues/1373
 - Assistant API: https://github.com/mudler/LocalAI/issues/1273
 - Moderation endpoint: https://github.com/mudler/LocalAI/issues/999
 - Vulkan: https://github.com/mudler/LocalAI/issues/1647
+- Anthropic API: https://github.com/mudler/LocalAI/issues/1808
 
 If you want to help and contribute, issues up for grabs: https://github.com/mudler/LocalAI/issues?q=is%3Aissue+is%3Aopen+label%3A%22up+for+grabs%22
-
-## 💻 [Getting started](https://localai.io/basics/getting_started/index.html)
-
-For a detailed step-by-step introduction, refer to the [Getting Started](https://localai.io/basics/getting_started/index.html) guide. 
-
-For those in a hurry, here's a straightforward one-liner to launch a LocalAI AIO(All-in-one) Image using `docker`:
-
-```bash
-docker run -ti --name local-ai -p 8080:8080 localai/localai:latest-aio-cpu
-# or, if you have an Nvidia GPU:
-# docker run -ti --name local-ai -p 8080:8080 --gpus all localai/localai:latest-aio-gpu-nvidia-cuda-12
-```
 
 ## 🚀 [Features](https://localai.io/features/)
 
@@ -88,12 +102,14 @@ docker run -ti --name local-ai -p 8080:8080 localai/localai:latest-aio-cpu
 - 🗣 [Text to Audio](https://localai.io/features/text-to-audio/)
 - 🔈 [Audio to Text](https://localai.io/features/audio-to-text/) (Audio transcription with `whisper.cpp`)
 - 🎨 [Image generation with stable diffusion](https://localai.io/features/image-generation)
-- 🔥 [OpenAI functions](https://localai.io/features/openai-functions/) 🆕
+- 🔥 [OpenAI-alike tools API](https://localai.io/features/openai-functions/) 
 - 🧠 [Embeddings generation for vector databases](https://localai.io/features/embeddings/)
 - ✍️ [Constrained grammars](https://localai.io/features/constrained_grammars/)
 - 🖼️ [Download Models directly from Huggingface ](https://localai.io/models/)
 - 🥽 [Vision API](https://localai.io/features/gpt-vision/)
-- 🆕 [Reranker API](https://localai.io/features/reranker/)
+- 📈 [Reranker API](https://localai.io/features/reranker/)
+- 🆕🖧 [P2P Inferencing](https://localai.io/features/distribute/)
+- 🌍 Integrated WebUI!
 
 ## 💻 Usage
 
@@ -107,6 +123,7 @@ Build and deploy custom containers:
 WebUIs:
 - https://github.com/Jirubizu/localai-admin
 - https://github.com/go-skynet/LocalAI-frontend
+- QA-Pilot(An interactive chat project that leverages LocalAI LLMs for rapid understanding and navigation of GitHub code repository) https://github.com/reid41/QA-Pilot
 
 Model galleries
 - https://github.com/go-skynet/model-gallery
@@ -116,16 +133,18 @@ Other:
 - VSCode extension https://github.com/badgooooor/localai-vscode-plugin
 - Terminal utility https://github.com/djcopley/ShellOracle
 - Local Smart assistant https://github.com/mudler/LocalAGI
-- Home Assistant https://github.com/sammcj/homeassistant-localai / https://github.com/drndos/hass-openai-custom-conversation
+- Home Assistant https://github.com/sammcj/homeassistant-localai / https://github.com/drndos/hass-openai-custom-conversation / https://github.com/valentinfrlch/ha-gpt4vision
 - Discord bot https://github.com/mudler/LocalAGI/tree/main/examples/discord
 - Slack bot https://github.com/mudler/LocalAGI/tree/main/examples/slack
+- Shell-Pilot(Interact with LLM using LocalAI models via pure shell scripts on your Linux or MacOS system) https://github.com/reid41/shell-pilot
 - Telegram bot https://github.com/mudler/LocalAI/tree/master/examples/telegram-bot
+- Github Actions: https://github.com/marketplace/actions/start-localai
 - Examples: https://github.com/mudler/LocalAI/tree/master/examples/
   
 
 ### 🔗 Resources
 
-- 🆕 New! [LLM finetuning guide](https://localai.io/docs/advanced/fine-tuning/)
+- [LLM finetuning guide](https://localai.io/docs/advanced/fine-tuning/)
 - [How to build locally](https://localai.io/basics/build/index.html)
 - [How to install in Kubernetes](https://localai.io/basics/getting_started/index.html#run-localai-in-kubernetes)
 - [Projects integrating LocalAI](https://localai.io/docs/integrations/)
@@ -133,6 +152,8 @@ Other:
 
 ## :book: 🎥 [Media, Blogs, Social](https://localai.io/basics/news/#media-blogs-social)
 
+- [Run Visual studio code with LocalAI (SUSE)](https://www.suse.com/c/running-ai-locally/)
+- 🆕 [Run LocalAI on Jetson Nano Devkit](https://mudler.pm/posts/local-ai-jetson-nano-devkit/)
 - [Run LocalAI on AWS EKS with Pulumi](https://www.pulumi.com/blog/low-code-llm-apps-with-local-ai-flowise-and-pulumi/)
 - [Run LocalAI on AWS](https://staleks.hashnode.dev/installing-localai-on-aws-ec2-instance)
 - [Create a slackbot for teams and OSS projects that answer to documentation](https://mudler.pm/posts/smart-slackbot-for-teams/)
@@ -160,17 +181,16 @@ If you utilize this repository, data in a downstream project, please consider ci
 
 Support the project by becoming [a backer or sponsor](https://github.com/sponsors/mudler). Your logo will show up here with a link to your website.
 
-A huge thank you to our generous sponsors who support this project:
+A huge thank you to our generous sponsors who support this project covering CI expenses, and our [Sponsor list](https://github.com/sponsors/mudler):
 
-| ![Spectro Cloud logo_600x600px_transparent bg](https://github.com/go-skynet/LocalAI/assets/2420543/68a6f3cb-8a65-4a4d-99b5-6417a8905512) |
-|:-----------------------------------------------:|
-|  [Spectro Cloud](https://www.spectrocloud.com/)  |
-|  Spectro Cloud kindly supports LocalAI by providing GPU and computing resources to run tests on lamdalabs!  |
-
-And a huge shout-out to individuals sponsoring the project by donating hardware or backing the project.
-
-- [Sponsor list](https://github.com/sponsors/mudler)
-- JDAM00 (donating HW for the CI)
+<p align="center">
+  <a href="https://www.spectrocloud.com/" target="blank">
+    <img height="200" src="https://github.com/go-skynet/LocalAI/assets/2420543/68a6f3cb-8a65-4a4d-99b5-6417a8905512">
+  </a>
+  <a href="https://www.premai.io/" target="blank">
+    <img height="200" src="https://github.com/mudler/LocalAI/assets/2420543/42e4ca83-661e-4f79-8e46-ae43689683d6"> <br>
+  </a>
+</p>
 
 ## 🌟 Star history
 
@@ -180,7 +200,7 @@ And a huge shout-out to individuals sponsoring the project by donating hardware 
 
 LocalAI is a community-driven project created by [Ettore Di Giacinto](https://github.com/mudler/).
 
-MIT - Author Ettore Di Giacinto
+MIT - Author Ettore Di Giacinto <mudler@localai.io>
 
 ## 🙇 Acknowledgements
 

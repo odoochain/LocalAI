@@ -16,6 +16,7 @@ service Backend {
   rpc GenerateImage(GenerateImageRequest) returns (Result) {}
   rpc AudioTranscription(TranscriptRequest) returns (TranscriptResult) {}
   rpc TTS(TTSRequest) returns (Result) {}
+  rpc SoundGeneration(SoundGenerationRequest) returns (Result) {}
   rpc TokenizeString(PredictOptions) returns (TokenizationResponse) {}
   rpc Status(HealthMessage) returns (StatusResponse) {}
 
@@ -133,6 +134,8 @@ message PredictOptions {
   repeated string Images = 42;
   bool UseTokenizerTemplate = 43;
   repeated Message Messages = 44;
+  repeated string Videos = 45;
+  repeated string Audios = 46;
 }
 
 // The response message containing the result
@@ -212,6 +215,9 @@ message ModelOptions {
   float YarnBetaSlow = 47;
 
   string Type = 49;
+
+  bool FlashAttention = 56;
+  bool NoKVOffload = 57;
 }
 
 message Result {
@@ -227,6 +233,7 @@ message TranscriptRequest {
   string dst = 2;
   string language = 3;
   uint32 threads = 4;
+  bool translate = 5;
 }
 
 message TranscriptResult {
@@ -263,6 +270,18 @@ message TTSRequest {
   string model = 2;
   string dst = 3;
   string voice = 4;
+  optional string language = 5;
+}
+
+message SoundGenerationRequest {
+  string text = 1;
+  string model = 2;
+  string dst = 3;
+  optional float duration = 4;
+  optional float temperature = 5;
+  optional bool sample = 6;
+  optional string src = 7;
+  optional int32 src_divisor = 8;
 }
 
 message TokenizationResponse {

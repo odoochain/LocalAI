@@ -9,14 +9,16 @@ import (
 	"sync"
 	"unicode/utf8"
 
-	"github.com/go-skynet/LocalAI/core/config"
-	"github.com/go-skynet/LocalAI/core/schema"
+	"github.com/rs/zerolog/log"
 
-	"github.com/go-skynet/LocalAI/pkg/gallery"
-	"github.com/go-skynet/LocalAI/pkg/grpc"
-	"github.com/go-skynet/LocalAI/pkg/grpc/proto"
-	model "github.com/go-skynet/LocalAI/pkg/model"
-	"github.com/go-skynet/LocalAI/pkg/utils"
+	"github.com/mudler/LocalAI/core/config"
+	"github.com/mudler/LocalAI/core/schema"
+
+	"github.com/mudler/LocalAI/core/gallery"
+	"github.com/mudler/LocalAI/pkg/grpc"
+	"github.com/mudler/LocalAI/pkg/grpc/proto"
+	model "github.com/mudler/LocalAI/pkg/model"
+	"github.com/mudler/LocalAI/pkg/utils"
 )
 
 type LLMResponse struct {
@@ -29,7 +31,7 @@ type TokenUsage struct {
 	Completion int
 }
 
-func ModelInference(ctx context.Context, s string, messages []schema.Message, images []string, loader *model.ModelLoader, c config.BackendConfig, o *config.ApplicationConfig, tokenCallback func(string, TokenUsage) bool) (func() (LLMResponse, error), error) {
+func ModelInference(ctx context.Context, s string, messages []schema.Message, images, videos, audios []string, loader *model.ModelLoader, c config.BackendConfig, o *config.ApplicationConfig, tokenCallback func(string, TokenUsage) bool) (func() (LLMResponse, error), error) {
 	modelFile := c.Model
 	threads := c.Threads
 	if *threads == 0 && o.Threads != 0 {
@@ -57,7 +59,7 @@ func ModelInference(ctx context.Context, s string, messages []schema.Message, im
 		if _, err := os.Stat(modelFile); os.IsNotExist(err) {
 			utils.ResetDownloadTimers()
 			// if we failed to load the model, we try to download it
-			err := gallery.InstallModelFromGalleryByName(o.Galleries, modelFile, loader.ModelPath, gallery.GalleryModel{}, utils.DisplayDownloadFunction)
+			err := gallery.InstallModelFromGallery(o.Galleries, modelFile, loader.ModelPath, gallery.GalleryModel{}, utils.DisplayDownloadFunction, o.EnforcePredownloadScans)
 			if err != nil {
 				return nil, err
 			}
@@ -87,7 +89,7 @@ func ModelInference(ctx context.Context, s string, messages []schema.Message, im
 			case string:
 				protoMessages[i].Content = ct
 			default:
-				return nil, fmt.Errorf("Unsupported type for schema.Message.Content for inference: %T", ct)
+				return nil, fmt.Errorf("unsupported type for schema.Message.Content for inference: %T", ct)
 			}
 		}
 	}
@@ -99,6 +101,8 @@ func ModelInference(ctx context.Context, s string, messages []schema.Message, im
 		opts.Messages = protoMessages
 		opts.UseTokenizerTemplate = c.TemplateConfig.UseTokenizerTemplate
 		opts.Images = images
+		opts.Videos = videos
+		opts.Audios = audios
 
 		tokenUsage := TokenUsage{}
 
@@ -181,11 +185,35 @@ func Finetune(config config.BackendConfig, input, prediction string) string {
 		mu.Lock()
 		reg, ok := cutstrings[c]
 		if !ok {
-			cutstrings[c] = regexp.MustCompile(c)
+			r, err := regexp.Compile(c)
+			if err != nil {
+				log.Fatal().Err(err).Msg("failed to compile regex")
+			}
+			cutstrings[c] = r
 			reg = cutstrings[c]
 		}
 		mu.Unlock()
 		prediction = reg.ReplaceAllString(prediction, "")
+	}
+
+	// extract results from the response which can be for instance inside XML tags
+	var predResult string
+	for _, r := range config.ExtractRegex {
+		mu.Lock()
+		reg, ok := cutstrings[r]
+		if !ok {
+			regex, err := regexp.Compile(r)
+			if err != nil {
+				log.Fatal().Err(err).Msg("failed to compile regex")
+			}
+			cutstrings[r] = regex
+			reg = regex
+		}
+		mu.Unlock()
+		predResult += reg.FindString(prediction)
+	}
+	if predResult != "" {
+		prediction = predResult
 	}
 
 	for _, c := range config.TrimSpace {

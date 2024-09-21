@@ -40,45 +40,153 @@ parameters:
 To use the functions with the OpenAI client in python:
 
 ```python
-import openai
+from openai import OpenAI
+
 # ...
 # Send the conversation and available functions to GPT
-messages = [{"role": "user", "content": "What's the weather like in Boston?"}]
-functions = [
+messages = [{"role": "user", "content": "What is the weather like in Beijing now?"}]
+tools = [
     {
-        "name": "get_current_weather",
-        "description": "Get the current weather in a given location",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "location": {
-                    "type": "string",
-                    "description": "The city and state, e.g. San Francisco, CA",
+        "type": "function",
+        "function": {
+            "name": "get_current_weather",
+            "description": "Return the temperature of the specified region specified by the user",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "location": {
+                        "type": "string",
+                        "description": "User specified region",
+                    },
+                    "unit": {
+                        "type": "string",
+                        "enum": ["celsius", "fahrenheit"],
+                        "description": "temperature unit"
+                    },
                 },
-                "unit": {"type": "string", "enum": ["celsius", "fahrenheit"]},
+                "required": ["location"],
             },
-            "required": ["location"],
         },
     }
 ]
-response = openai.ChatCompletion.create(
-    model="gpt-3.5-turbo",
-    messages=messages,
-    functions=functions,
-    function_call="auto",
+
+client = OpenAI(
+    # This is the default and can be omitted
+    api_key="test",
+    base_url="http://localhost:8080/v1/"
 )
-# ...
+
+response =client.chat.completions.create(
+    messages=messages,
+    tools=tools,
+    tool_choice ="auto",
+    model="gpt-4",
+)
+#...
 ```
 
-{{% alert note %}}
-When running the python script, be sure to:
+For example, with curl:
 
-- Set `OPENAI_API_KEY` environment variable to a random string (the OpenAI api key is NOT required!)
-- Set `OPENAI_API_BASE` to point to your LocalAI service, for example `OPENAI_API_BASE=http://localhost:8080`
+```bash
+curl http://localhost:8080/v1/chat/completions -H "Content-Type: application/json" -d '{
+  "model": "gpt-4",
+  "messages": [{"role": "user", "content": "What is the weather like in Beijing now?"}],
+  "tools": [
+        {
+            "type": "function",
+            "function": {
+                "name": "get_current_weather",
+                "description": "Return the temperature of the specified region specified by the user",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "location": {
+                            "type": "string",
+                            "description": "User specified region"
+                        },
+                        "unit": {
+                            "type": "string",
+                            "enum": ["celsius", "fahrenheit"],
+                            "description": "temperature unit"
+                        }
+                    },
+                    "required": ["location"]
+                }
+            }
+        }
+    ],
+    "tool_choice":"auto"
+}'
+```
 
-{{% /alert %}}
+Return data：
+
+```json
+{
+    "created": 1724210813,
+    "object": "chat.completion",
+    "id": "16b57014-477c-4e6b-8d25-aad028a5625e",
+    "model": "gpt-4",
+    "choices": [
+        {
+            "index": 0,
+            "finish_reason": "tool_calls",
+            "message": {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "index": 0,
+                        "id": "16b57014-477c-4e6b-8d25-aad028a5625e",
+                        "type": "function",
+                        "function": {
+                            "name": "get_current_weather",
+                            "arguments": "{\"location\":\"Beijing\",\"unit\":\"celsius\"}"
+                        }
+                    }
+                ]
+            }
+        }
+    ],
+    "usage": {
+        "prompt_tokens": 221,
+        "completion_tokens": 26,
+        "total_tokens": 247
+    }
+}
+```
 
 ## Advanced
+
+### Use functions without grammars
+
+The functions calls maps automatically to grammars which are currently supported only by llama.cpp, however, it is possible to turn off the use of grammars, and extract tool arguments from the LLM responses, by specifying in the YAML file `no_grammar` and a regex to map the response from the LLM:
+
+```yaml
+name: model_name
+parameters:
+  # Model file name
+  model: model/name
+
+function:
+  # set to true to not use grammars
+  no_grammar: true
+  # set one or more regexes used to extract the function tool arguments from the LLM response
+  response_regex:
+  - "(?P<function>\w+)\s*\((?P<arguments>.*)\)"
+```
+
+The response regex have to be a regex with named parameters to allow to scan the function name and the arguments. For instance, consider:
+
+```
+(?P<function>\w+)\s*\((?P<arguments>.*)\)
+```
+
+will catch
+
+```
+function_name({ "foo": "bar"})
+```
 
 ### Parallel tools calls
 

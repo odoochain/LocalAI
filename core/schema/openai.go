@@ -2,8 +2,9 @@ package schema
 
 import (
 	"context"
+	"time"
 
-	functions "github.com/go-skynet/LocalAI/pkg/functions"
+	functions "github.com/mudler/LocalAI/pkg/functions"
 )
 
 // APIError provides error information returned by the OpenAI API.
@@ -57,6 +58,8 @@ type Content struct {
 	Type     string     `json:"type" yaml:"type"`
 	Text     string     `json:"text" yaml:"text"`
 	ImageURL ContentURL `json:"image_url" yaml:"image_url"`
+	AudioURL ContentURL `json:"audio_url" yaml:"audio_url"`
+	VideoURL ContentURL `json:"video_url" yaml:"video_url"`
 }
 
 type ContentURL struct {
@@ -75,6 +78,8 @@ type Message struct {
 
 	StringContent string   `json:"string_content,omitempty" yaml:"string_content,omitempty"`
 	StringImages  []string `json:"string_images,omitempty" yaml:"string_images,omitempty"`
+	StringVideos  []string `json:"string_videos,omitempty" yaml:"string_videos,omitempty"`
+	StringAudios  []string `json:"string_audios,omitempty" yaml:"string_audios,omitempty"`
 
 	// A result of a function call
 	FunctionCall interface{} `json:"function_call,omitempty" yaml:"function_call,omitempty"`
@@ -99,10 +104,54 @@ type OpenAIModel struct {
 	Object string `json:"object"`
 }
 
+type DeleteAssistantResponse struct {
+	ID      string `json:"id"`
+	Object  string `json:"object"`
+	Deleted bool   `json:"deleted"`
+}
+
+// File represents the structure of a file object from the OpenAI API.
+type File struct {
+	ID        string    `json:"id"`         // Unique identifier for the file
+	Object    string    `json:"object"`     // Type of the object (e.g., "file")
+	Bytes     int       `json:"bytes"`      // Size of the file in bytes
+	CreatedAt time.Time `json:"created_at"` // The time at which the file was created
+	Filename  string    `json:"filename"`   // The name of the file
+	Purpose   string    `json:"purpose"`    // The purpose of the file (e.g., "fine-tune", "classifications", etc.)
+}
+
+type ListFiles struct {
+	Data   []File
+	Object string
+}
+
+type AssistantFileRequest struct {
+	FileID string `json:"file_id"`
+}
+
+type DeleteAssistantFileResponse struct {
+	ID      string `json:"id"`
+	Object  string `json:"object"`
+	Deleted bool   `json:"deleted"`
+}
+
+type ImageGenerationResponseFormat string
+
 type ChatCompletionResponseFormatType string
 
 type ChatCompletionResponseFormat struct {
 	Type ChatCompletionResponseFormatType `json:"type,omitempty"`
+}
+
+type JsonSchemaRequest struct {
+	Type       string     `json:"type"`
+	JsonSchema JsonSchema `json:"json_schema"`
+}
+
+type JsonSchema struct {
+	Name   string         `json:"name"`
+	Strict bool           `json:"strict"`
+	Schema functions.Item `json:"schema"`
 }
 
 type OpenAIRequest struct {
@@ -114,7 +163,7 @@ type OpenAIRequest struct {
 	// whisper
 	File string `json:"file" validate:"required"`
 	//whisper/image
-	ResponseFormat ChatCompletionResponseFormat `json:"response_format"`
+	ResponseFormat interface{} `json:"response_format,omitempty"`
 	// image
 	Size string `json:"size"`
 	// Prompt is read only by completion/image API calls
@@ -151,4 +200,9 @@ type OpenAIRequest struct {
 
 	// AutoGPTQ
 	ModelBaseName string `json:"model_base_name" yaml:"model_base_name"`
+}
+
+type ModelsDataResponse struct {
+	Object string        `json:"object"`
+	Data   []OpenAIModel `json:"data"`
 }

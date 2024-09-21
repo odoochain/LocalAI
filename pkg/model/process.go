@@ -5,50 +5,32 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
-	"time"
 
 	"github.com/hpcloud/tail"
 	process "github.com/mudler/go-processmanager"
 	"github.com/rs/zerolog/log"
 )
 
-func (ml *ModelLoader) StopAllExcept(s string) error {
-	return ml.StopGRPC(func(id string, p *process.Process) bool {
-		if id != s {
-			for ml.models[id].GRPC(false, ml.wd).IsBusy() {
-				log.Debug().Msgf("%s busy. Waiting.", id)
-				time.Sleep(2 * time.Second)
-			}
-			log.Debug().Msgf("[single-backend] Stopping %s", id)
-			return true
-		}
-		return false
-	})
-}
-
 func (ml *ModelLoader) deleteProcess(s string) error {
-	if err := ml.grpcProcesses[s].Stop(); err != nil {
-		return err
+	if _, exists := ml.grpcProcesses[s]; exists {
+		if err := ml.grpcProcesses[s].Stop(); err != nil {
+			log.Error().Err(err).Msgf("(deleteProcess) error while deleting grpc process %s", s)
+		}
 	}
 	delete(ml.grpcProcesses, s)
 	delete(ml.models, s)
 	return nil
 }
 
-type GRPCProcessFilter = func(id string, p *process.Process) bool
-
-func includeAllProcesses(_ string, _ *process.Process) bool {
-	return true
-}
-
 func (ml *ModelLoader) StopGRPC(filter GRPCProcessFilter) error {
 	var err error = nil
 	for k, p := range ml.grpcProcesses {
 		if filter(k, p) {
-			e := ml.deleteProcess(k)
+			e := ml.ShutdownModel(k)
 			err = errors.Join(err, e)
 		}
 	}
@@ -56,10 +38,12 @@ func (ml *ModelLoader) StopGRPC(filter GRPCProcessFilter) error {
 }
 
 func (ml *ModelLoader) StopAllGRPC() error {
-	return ml.StopGRPC(includeAllProcesses)
+	return ml.StopGRPC(all)
 }
 
 func (ml *ModelLoader) GetGRPCPID(id string) (int, error) {
+	ml.mu.Lock()
+	defer ml.mu.Unlock()
 	p, exists := ml.grpcProcesses[id]
 	if !exists {
 		return -1, fmt.Errorf("no grpc backend found for %s", id)
@@ -67,7 +51,7 @@ func (ml *ModelLoader) GetGRPCPID(id string) (int, error) {
 	return strconv.Atoi(p.PID)
 }
 
-func (ml *ModelLoader) startProcess(grpcProcess, id string, serverAddress string) error {
+func (ml *ModelLoader) startProcess(grpcProcess, id string, serverAddress string, args ...string) error {
 	// Make sure the process is executable
 	if err := os.Chmod(grpcProcess, 0700); err != nil {
 		return err
@@ -77,11 +61,17 @@ func (ml *ModelLoader) startProcess(grpcProcess, id string, serverAddress string
 
 	log.Debug().Msgf("GRPC Service for %s will be running at: '%s'", id, serverAddress)
 
+	workDir, err := filepath.Abs(filepath.Dir(grpcProcess))
+	if err != nil {
+		return err
+	}
+
 	grpcControlProcess := process.New(
 		process.WithTemporaryStateDir(),
-		process.WithName(grpcProcess),
-		process.WithArgs("--addr", serverAddress),
+		process.WithName(filepath.Base(grpcProcess)),
+		process.WithArgs(append(args, []string{"--addr", serverAddress}...)...),
 		process.WithEnvironment(os.Environ()...),
+		process.WithWorkDir(workDir),
 	)
 
 	if ml.wd != nil {
@@ -101,7 +91,10 @@ func (ml *ModelLoader) startProcess(grpcProcess, id string, serverAddress string
 		c := make(chan os.Signal, 1)
 		signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 		<-c
-		grpcControlProcess.Stop()
+		err := grpcControlProcess.Stop()
+		if err != nil {
+			log.Error().Err(err).Msg("error while shutting down grpc process")
+		}
 	}()
 
 	go func() {
